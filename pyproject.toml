@@ -1,0 +1,69 @@
+# pyproject.toml
+# This file defines the entire package, its dependencies, and its tooling.
+# It is the single source of truth for packaging and project metadata.
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "your-orm"
+version = "0.1.0"
+authors = [
+  { name="Your Name", email="you@example.com" },
+]
+description = "An opinionated, modern ORM for Python combining the power of SQLAlchemy 2.0 with a clean, symmetrical API for sync and async operations."
+readme = "README.md"
+requires-python = ">=3.12"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Topic :: Database",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+
+# Core dependencies required for the package to function.
+dependencies = [
+    "sqlalchemy>=2.0",
+    "alembic>=1.8",
+    "click>=8.0",
+    "toml>=0.10",
+]
+
+[project.urls]
+"Homepage" = "https://github.com/example/your-orm"
+"Bug Tracker" = "https://github.com/example/your-orm/issues"
+
+# This section creates the `your-orm` command-line tool.
+# It points to the `migrate` function inside our cli.py file.
+[project.scripts]
+your-orm = "your_orm.migrations.cli:migrate"
+
+[project.optional-dependencies]
+# Database-specific drivers. Users will install the one they need.
+# Example: pip install your-orm[postgres]
+postgres = ["psycopg[binary, pool]>=3.1"]
+mysql = ["asyncmy>=0.2"]
+sqlite = ["aiosqlite>=0.17"]
+
+# Dependencies only needed for developing and testing 'your-orm' itself.
+# Example: pip install -e .[dev]
+dev = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.20",
+    "ruff>=0.1",
+    "black>=23.0",
+]
+
+# --- Tool Configuration ---
+
+[tool.ruff]
+# Standard Python code linter and formatter configuration.
+line-length = 88
+select = ["E", "F", "W", "I"] # Standard flake8 rules + isort
+
+[tool.black]
+line-length = 88
