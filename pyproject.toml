@@ -38,9 +38,9 @@ dependencies = [
 "Bug Tracker" = "https://github.com/example/your-orm/issues"
 
 # This section creates the `your-orm` command-line tool.
-# It points to the `migrate` function inside our cli.py file.
+# It points to the main `cli` group function inside our cli.py file.
 [project.scripts]
-your-orm = "your_orm.migrations.cli:migrate"
+your-orm = "your_orm.migrations.cli:cli"
 
 [project.optional-dependencies]
 # Database-specific drivers. Users will install the one they need.

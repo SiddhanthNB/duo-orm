@@ -14,9 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 #
 # The rest of the ORM will use .get() on this variable to find the
 # currently active session.
-active_session_var: ContextVar[Union[Session, AsyncSession]] = ContextVar(
-    "active_session"
-)
+active_session_var: ContextVar[Union[Session, AsyncSession]] = ContextVar("active_session")
 
 
 def is_async_context() -> bool:

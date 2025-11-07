@@ -9,7 +9,7 @@ from alembic import context
 
 # --- This is the most important part! ---
 # The 'your-orm migrate init' command dynamically inserts the correct import path here.
-from {db_object_import_path} import db as your_orm_db
+from {db_object_module} import {db_object_name} as your_orm_db
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
