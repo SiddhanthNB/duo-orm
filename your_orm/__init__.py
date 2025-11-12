@@ -9,8 +9,8 @@ asynchronous database operations, built on SQLAlchemy 2.0.
 
 __version__ = "0.1.0"
 
-# Apply the patch for custom operators
-from . import patch
+# Apply lightweight operator ergonomics
+from . import patch  # noqa: F401
 
 # --- Import and re-export all common components for a modern 2.0 workflow ---
 
@@ -43,6 +43,7 @@ from .exceptions import (
     IntegrityError,
     ValidationError,
 )
+from .query import json, array
 
 
 __all__ = [
@@ -76,4 +77,6 @@ __all__ = [
     "UnsupportedOperationError",
     "IntegrityError",
     "ValidationError",
+    "json",
+    "array",
 ]

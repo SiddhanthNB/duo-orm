@@ -175,6 +175,8 @@ async with db.standalone_session() as session:
 * `QueryBuilder.exists()` – returns `True/False` without materializing rows.
 * `QueryBuilder.paginate(limit, offset=0)` – oneliner to apply both LIMIT and OFFSET.
 * `QueryBuilder.related(User.posts, where=[...], aggregate="exists", loader="selectin")` – single entry point for filtering/aggregating/eager-loading across one relationship. Eager loading always happens (use `"selectin"` for collections, `"joined"` for scalars via the `loader` option).
+* `json(User.profile)["flags"]["beta"].is_null()` – Pythonic JSON-path helper that compiles to regular SQLAlchemy expressions, so you can write complex JSON predicates inside `.where(...)` without juggling driver-specific operators.
+* `array(User.tags).includes_any(["python", "orm"])` – expressive ARRAY helper for membership / superset / overlap checks without memorizing dialect-specific operators.
 * All helpers work in sync and async contexts just like `.first()` and `.all()`.
 
 ## 🧠 Why SQLAlchemy Underneath?
@@ -199,29 +201,64 @@ your-orm stands on SQLAlchemy Core for query generation, schema metadata, type h
 | Method | Example |
 | --- | --- |
 | `.in_([...])` | `User.country.in_(['IE', 'IN'])` |
-| `.not_in_([...])` | `User.role.not_in_(['banned', 'test'])` |
-| `.like_(pattern)` | `User.name.like_('%son')` |
-| `.ilike_(pattern)` | `User.name.ilike_('%son')` |
-| `.startswith_(prefix)` | `User.name.startswith_('Al')` |
-| `.endswith_(suffix)` | `User.name.endswith_('son')` |
-| `.contains_(substr)` | `User.bio.contains_('python')` |
+| `.notin_([...])` | `User.role.notin_(['banned', 'test'])` |
+| `.contains(value)` | `User.email.contains('@example.com')` |
+| `.icontains(value)` | `User.email.icontains('@example.com')` |
+| `.startswith(prefix)` | `User.name.startswith('Al')` |
+| `.istartswith(prefix)` | `User.name.istartswith('al')` |
+| `.iendswith(suffix)` | `User.slug.iendswith('-beta')` |
 
-### Array Operators (PostgreSQL)
+Case-insensitive helpers (`.icontains`, `.istartswith`, `.iendswith`) are provided by your-orm and work on any column whose SQLAlchemy type derives from `String`. For custom wildcard patterns you can still fall back to SQLAlchemy’s `.like()` / `.ilike()`, but the ergonomic helpers cover 80% of real-world use.
 
-| Method | Example |
-| --- | --- |
-| `.contains_([...])` | `User.tags.contains_(['python'])` |
-| `.overlap_([...])` | `User.tags.overlap_(['js','python'])` |
-| `.contained_in_([...])` | `User.tags.contained_in_(['python','ai','db'])` |
+### JSON Path Helper
 
-### JSON Operators (PostgreSQL)
+Use the built-in `json()` helper to compose JSON predicates that drop straight into `where()`:
 
-| Form | Example |
-| --- | --- |
-| `User.profile['key']` | `User.profile['plan'] == 'pro'` |
-| `User.profile['key'].as_integer()` | `User.profile['age'].as_integer() > 30` |
-| `.has_key_(key)` | `User.profile.has_key_('plan')` |
-| `.contains_({...})` | `User.profile.contains_({'plan': 'pro'})` |
+```python
+from your_orm import json
+
+await User.where(
+    json(User.profile)["flags"]["beta"].is_null() |
+    json(User.profile)["flags"]["beta"].equals("")
+).all()
+```
+
+It mirrors normal Python dict access (`[...]`) and exposes fluent helpers that emit SQLAlchemy clauses:
+
+| Helper | Purpose | Example |
+| --- | --- | --- |
+| `json(col)["key"]` | Navigate nested keys/indices | `json(User.profile)["flags"]["beta"]` |
+| `.equals(value)` / `==` | Compare scalars (auto-casts to text unless you call `.as_integer()` etc.) | `json(User.profile)["plan"] == "pro"` |
+| `.contains(fragment)` | JSON containment (`@>`-style) for dict/list fragments | `json(User.profile).contains({"plan": "enterprise"})` |
+| `.has_key(key)` | Key existence (dialect-dependent; raises if unsupported) | `json(User.profile)["flags"].has_key("beta")` |
+| `.is_null()` / `.is_not_null()` | Null checks on the selected path | `json(User.profile)["expires_at"].is_null()` |
+| `.as_integer()` / `.as_float()` / `.as_boolean()` / `.as_text()` | Cast before comparisons | `json(User.profile)["quota"].as_integer() > 10` |
+
+Because the helper returns ordinary SQLAlchemy expressions, you can combine them with `&`, `|`, `not_`, nest them alongside other filters, and even extract the raw expression via `.expression()`. Dialect support is enforced by SQLAlchemy—if the backend lacks a JSON operator (e.g., `has_key` on SQLite), you’ll get a clear error at query construction time.
+
+### Array Helper
+
+For ARRAY columns, reach for the `array()` helper:
+
+```python
+from your_orm import array
+
+await User.where(
+    array(User.tags).includes("orm") &
+    array(User.tags).includes_all(["python", "asyncio"])
+).all()
+```
+
+Helper methods map directly to common set-style checks:
+
+| Helper | Purpose | Example |
+| --- | --- | --- |
+| `.includes(value)` | True if the array contains that single value (`value = ANY(column)`). | `array(User.tags).includes("orm")` |
+| `.includes_all(values)` | True if the array contains all provided values (`@>`). | `array(User.tags).includes_all(["python","orm"])` |
+| `.includes_any(values)` | True if the array overlaps any provided value (`&&`). | `array(User.tags).includes_any(["java","go"])` |
+| `.length()` | Number of elements (uses `cardinality()` when available, otherwise `array_length(..., 1)`). | `array(User.tags).length() > 2` |
+
+These helpers return SQLAlchemy expressions, so they compose with the rest of your filters exactly like built-in clauses. SQLAlchemy/dialect support rules still apply—unsupported ARRAY operators raise the driver’s error (or the helper re-raises with a clearer message).
 
 ### Relationship Operators
 

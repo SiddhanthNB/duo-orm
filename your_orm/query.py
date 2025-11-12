@@ -1,15 +1,252 @@
 # your_orm/query.py
 
 from __future__ import annotations
-from typing import TYPE_CHECKING, Type, TypeVar, List, Optional, Sequence, Callable, Any
+from dataclasses import dataclass, replace
+from typing import (
+    TYPE_CHECKING,
+    Type,
+    TypeVar,
+    List,
+    Optional,
+    Sequence,
+    Callable,
+    Any,
+    Tuple,
+    Iterable,
+)
 
-from sqlalchemy import select, func, and_, true, inspect as sa_inspect
+from sqlalchemy import (
+    select,
+    func,
+    and_,
+    true,
+    inspect as sa_inspect,
+    Boolean,
+    Float,
+    Integer,
+    Text,
+    cast,
+    ARRAY as SQLAlchemyARRAY,
+)
 from sqlalchemy.orm import RelationshipProperty, joinedload, selectinload
+from sqlalchemy.orm.attributes import InstrumentedAttribute
+from sqlalchemy.sql.operators import ColumnOperators
+from sqlalchemy.sql.elements import ClauseElement
+from sqlalchemy.types import JSON as SQLAlchemyJSON
+
+try:  # Optional dependency – present on Postgres dialects.
+    from sqlalchemy.dialects.postgresql import JSONB, ARRAY as PG_ARRAY
+except Exception:  # pragma: no cover - dialect may not be installed.
+    JSONB = None  # type: ignore[misc,assignment]
+    PG_ARRAY = None  # type: ignore[misc,assignment]
 
 from .executor import _first, _all, _update, _delete, _count, _one, _exists
 
 # This helps with type hinting for the model class itself.
 T = TypeVar("T")
+
+JSON_TYPES: Tuple[type, ...] = (SQLAlchemyJSON,)
+if JSONB is not None:
+    JSON_TYPES = JSON_TYPES + (JSONB,)
+
+ARRAY_TYPES: Tuple[type, ...] = (SQLAlchemyARRAY,)
+if PG_ARRAY is not None and PG_ARRAY not in ARRAY_TYPES:
+    ARRAY_TYPES = ARRAY_TYPES + (PG_ARRAY,)
+
+
+def _is_json_column(attr: InstrumentedAttribute) -> bool:
+    column_type = getattr(attr, "type", None)
+    if column_type is None:
+        return False
+    return isinstance(column_type, JSON_TYPES)
+
+
+def _is_array_column(attr: InstrumentedAttribute) -> bool:
+    column_type = getattr(attr, "type", None)
+    if column_type is None:
+        return False
+    if isinstance(column_type, ARRAY_TYPES):
+        return True
+    return bool(getattr(column_type, "_is_array", False))
+
+
+@dataclass(frozen=True)
+class JSONExpression:
+    column: InstrumentedAttribute
+    path: Tuple[Any, ...] = ()
+    cast_as: str | None = None
+
+    def __post_init__(self):
+        if not isinstance(self.column, InstrumentedAttribute):
+            raise TypeError("json() expects an InstrumentedAttribute column.")
+        if not _is_json_column(self.column):
+            raise TypeError("json() can only target JSON-capable columns.")
+
+    def __getitem__(self, key: Any) -> "JSONExpression":
+        if not isinstance(key, (str, int)):
+            raise TypeError("JSON paths only accept string or integer keys.")
+        return replace(self, path=self.path + (key,))
+
+    # --- Casting helpers -------------------------------------------------
+
+    def as_text(self) -> "JSONExpression":
+        return replace(self, cast_as="text")
+
+    def as_integer(self) -> "JSONExpression":
+        return replace(self, cast_as="integer")
+
+    def as_float(self) -> "JSONExpression":
+        return replace(self, cast_as="float")
+
+    def as_boolean(self) -> "JSONExpression":
+        return replace(self, cast_as="boolean")
+
+    # --- Predicates ------------------------------------------------------
+
+    def equals(self, value: Any) -> ClauseElement:
+        if value is None:
+            return self.is_null()
+        left = self._json_expr() if isinstance(value, (dict, list)) else self._scalar_expr()
+        return left == value
+
+    def not_equals(self, value: Any) -> ClauseElement:
+        if value is None:
+            return self.is_not_null()
+        left = self._json_expr() if isinstance(value, (dict, list)) else self._scalar_expr()
+        return left != value
+
+    def is_null(self) -> ClauseElement:
+        return self._json_expr().is_(None)
+
+    def is_not_null(self) -> ClauseElement:
+        return self._json_expr().is_not(None)
+
+    def is_true(self) -> ClauseElement:
+        return self.as_boolean()._scalar_expr().is_(True)
+
+    def is_false(self) -> ClauseElement:
+        return self.as_boolean()._scalar_expr().is_(False)
+
+    def contains(self, fragment: Any) -> ClauseElement:
+        return self._json_expr().contains(fragment)
+
+    def has_key(self, key: Any) -> ClauseElement:
+        expr = self._json_expr()
+        if not hasattr(expr, "has_key"):
+            raise TypeError("The current dialect does not expose JSON has_key().")
+        return expr.has_key(key)  # type: ignore[attr-defined]
+
+    # Convenience to surface raw SQLAlchemy expression when needed.
+    def expression(self, *, as_text: bool = False) -> ClauseElement:
+        return self._scalar_expr() if as_text or self.cast_as else self._json_expr()
+
+    # Rich comparisons to keep syntax pythonic.
+    def __eq__(self, other: Any) -> ClauseElement:  # type: ignore[override]
+        return self.equals(other)
+
+    def __ne__(self, other: Any) -> ClauseElement:  # type: ignore[override]
+        return self.not_equals(other)
+
+    # --- Internals -------------------------------------------------------
+
+    def _json_expr(self) -> ColumnOperators:
+        expr: ColumnOperators = self.column
+        for key in self.path:
+            expr = expr[key]  # type: ignore[index]
+        return expr
+
+    def _scalar_expr(self) -> ClauseElement:
+        expr = self._json_expr()
+        match self.cast_as:
+            case "integer":
+                return cast(self._as_text(expr), Integer)
+            case "float":
+                return cast(self._as_text(expr), Float)
+            case "boolean":
+                return cast(self._as_text(expr), Boolean)
+            case "text" | None:
+                return self._as_text(expr)
+            case _:
+                return self._as_text(expr)
+
+    def _as_text(self, expr: ColumnOperators) -> ClauseElement:
+        text_expr = getattr(expr, "astext", None)
+        if text_expr is not None:
+            return text_expr
+        return cast(expr, Text)
+
+
+def json(column: InstrumentedAttribute) -> JSONExpression:
+    """
+    Entry point for building JSON-aware predicates inside QueryBuilder.where.
+    """
+    return JSONExpression(column)
+
+
+@dataclass(frozen=True)
+class ArrayExpression:
+    column: InstrumentedAttribute
+
+    def __post_init__(self):
+        if not isinstance(self.column, InstrumentedAttribute):
+            raise TypeError("array() expects an InstrumentedAttribute column.")
+        if not _is_array_column(self.column):
+            raise TypeError("array() can only target ARRAY-capable columns.")
+
+    def includes(self, value: Any) -> ClauseElement:
+        expr = self._array_expr()
+        contains_member = getattr(expr, "any", None)
+        if contains_member is None:
+            raise TypeError("The current dialect does not support array membership checks.")
+        return contains_member(value)
+
+    def includes_all(self, values: Iterable[Any]) -> ClauseElement:
+        prepared = self._prepare_values(values)
+        return self._array_expr().contains(prepared)
+
+    def includes_any(self, values: Iterable[Any]) -> ClauseElement:
+        prepared = self._prepare_values(values)
+        overlap = getattr(self._array_expr(), "overlap", None)
+        if overlap is None:
+            raise TypeError("The current dialect does not support array overlap checks.")
+        return overlap(prepared)
+
+    def equals(self, values: Iterable[Any]) -> ClauseElement:
+        return self._array_expr() == list(values)
+
+    def not_equals(self, values: Iterable[Any]) -> ClauseElement:
+        return self._array_expr() != list(values)
+
+    def length(self) -> ClauseElement:
+        expr = self._array_expr()
+        if hasattr(func, "cardinality"):
+            return func.cardinality(expr)
+        # Fallback: array_length(expr, 1) counts elements in the first dimension.
+        return func.array_length(expr, 1)
+
+    def expression(self) -> ColumnOperators:
+        return self._array_expr()
+
+    def _array_expr(self) -> ColumnOperators:
+        return self.column
+
+    def _prepare_values(self, values: Iterable[Any]) -> List[Any]:
+        if values is None:
+            raise ValueError("Array helpers require at least one value.")
+        if isinstance(values, (list, tuple)):
+            seq = list(values)
+        else:
+            seq = list(values)
+        if not seq:
+            raise ValueError("Array helpers require at least one value.")
+        return seq
+
+
+def array(column: InstrumentedAttribute) -> ArrayExpression:
+    """
+    Entry point for building ARRAY-aware predicates inside QueryBuilder.where.
+    """
+    return ArrayExpression(column)
 
 if TYPE_CHECKING:
     from .db import Database
