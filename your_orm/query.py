@@ -361,6 +361,11 @@ class QueryBuilder:
             having: Clause or list evaluated against aggregate expressions (only for "count").
             order_by: Ordering directives (only for "count").
             eager: False, True (defaults to selectinload), "selectin", or "joined".
+
+        Note:
+            `related()` currently only supports direct (single-hop) relationships off the root model.
+            Multi-level paths (e.g., `User.posts.comments`) must be expressed via SQLAlchemy directly or
+            broken into multiple queries.
         """
         if self._related_used:
             raise ValueError("related() can only be invoked once per query.")
@@ -375,28 +380,11 @@ class QueryBuilder:
         self._apply_eager_option(path, loader_choice)
 
         if agg == "exists":
-            if where_clauses:
-                predicate = self._combine_clauses(where_clauses)
-                expr = self._build_exists_expression(path, predicate)
-                self._statement = self._statement.where(expr)
+            self._apply_exists(path, where_clauses)
         elif agg == "all":
-            if not where_clauses:
-                raise ValueError("aggregate='all' requires at least one WHERE predicate.")
-            predicate = self._combine_clauses(where_clauses)
-            expr = self._build_all_expression(path, predicate)
-            self._statement = self._statement.where(expr)
+            self._apply_all(path, where_clauses)
         elif agg == "count":
-            count_expr = self._build_count_expression(path, where_clauses)
-            if not having_clauses and not order_clauses:
-                # If callers omit having/order, default to no-op filter but allow chaining.
-                pass
-            for clause in having_clauses:
-                rendered = clause(count_expr) if callable(clause) else clause
-                self._statement = self._statement.where(rendered)
-            for clause in order_clauses:
-                self._statement = self._statement.order_by(
-                    self._build_order_clause(clause, count_expr)
-                )
+            self._apply_count(path, where_clauses, having_clauses, order_clauses)
         else:
             raise ValueError("aggregate must be one of {'exists', 'all', 'count'}.")
 
@@ -500,6 +488,45 @@ class QueryBuilder:
             return true()
         return and_(*clauses)
 
+    def _apply_exists(self, path: List, where_clauses: Sequence) -> None:
+        """
+        aggregate="exists" uses SQLAlchemy's .any() to test whether at least one related row matches.
+        """
+        if not where_clauses:
+            return
+        predicate = self._combine_clauses(where_clauses)
+        expr = self._build_exists_expression(path, predicate)
+        self._statement = self._statement.where(expr)
+
+    def _apply_all(self, path: List, where_clauses: Sequence) -> None:
+        """
+        aggregate="all" uses the double-negative trick: ALL(pred) == NOT EXISTS(not pred).
+        """
+        if not where_clauses:
+            raise ValueError("aggregate='all' requires at least one WHERE predicate.")
+        predicate = self._combine_clauses(where_clauses)
+        expr = self._build_all_expression(path, predicate)
+        self._statement = self._statement.where(expr)
+
+    def _apply_count(
+        self,
+        path: List,
+        where_clauses: Sequence,
+        having_clauses: Sequence,
+        order_clauses: Sequence,
+    ) -> None:
+        """
+        aggregate="count" builds a correlated subquery counting related rows, then allows HAVING/ORDER BY on it.
+        """
+        count_expr = self._build_count_expression(path, where_clauses)
+        for clause in having_clauses:
+            rendered = clause(count_expr) if callable(clause) else clause
+            self._statement = self._statement.where(rendered)
+        for clause in order_clauses:
+            self._statement = self._statement.order_by(
+                self._build_order_clause(clause, count_expr)
+            )
+
     def _build_exists_expression(self, path: List, predicate) -> Any:
         expr = predicate
         for attr in reversed(path):
@@ -513,6 +540,14 @@ class QueryBuilder:
         return expr
 
     def _build_count_expression(self, path: List, where_clauses: Sequence) -> Any:
+        """
+        Build a correlated COUNT(*) subquery tied back to the parent entity.
+
+        Steps:
+            1. Start from the related entity's selectable, applying any WHERE clauses.
+            2. Walk the relationship path backwards to join secondary tables / parent tables.
+            3. Use correlate(parent_table) so SQLAlchemy links the inner COUNT to the outer statement.
+        """
         target_cls = path[-1].property.entity.class_
         mapper = sa_inspect(target_cls)
         target_table = mapper.selectable

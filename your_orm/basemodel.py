@@ -29,9 +29,6 @@ class _YourOrmMethods:
     # to the configured database instance.
     _db: "Database" = None
 
-    def __init_subclass__(cls, **kwargs):
-        super().__init_subclass__(**kwargs)
-
     # --- Class-level Querying API ---
 
     @classmethod

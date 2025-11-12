@@ -34,86 +34,110 @@ def _get_db_from_class(cls):
         )
     return cls._db
 
-# --- READ OPERATIONS (Refactored) ---
+def _resolve_db_target(*, query_builder=None, instance=None, cls=None):
+    if query_builder is not None:
+        return _get_db_from_query(query_builder)
+    if instance is not None:
+        return _get_db_from_instance(instance)
+    if cls is not None:
+        return _get_db_from_class(cls)
+    raise RuntimeError("Missing context for resolving database target.")
+
+
+def _run_with_session(
+    *,
+    query_builder=None,
+    instance=None,
+    cls=None,
+    transactional: bool = False,
+    work_sync,
+    work_async,
+):
+    active_session = active_session_var.get(None)
+
+    if is_async_context():
+
+        async def _execute_async():
+            if active_session is not None:
+                return await work_async(active_session)
+            db = _resolve_db_target(query_builder=query_builder, instance=instance, cls=cls)
+            async with db.async_session_factory() as session:
+                if transactional:
+                    async with session.begin():
+                        return await work_async(session)
+                return await work_async(session)
+
+        return _execute_async()
+
+    if active_session is not None:
+        return work_sync(active_session)
+
+    db = _resolve_db_target(query_builder=query_builder, instance=instance, cls=cls)
+    with db.sync_session_factory() as session:
+        if transactional:
+            with session.begin():
+                return work_sync(session)
+        return work_sync(session)
+
+
+# --- READ OPERATIONS ---
 
 def _first(query_builder):
     """Handles fetching the first record."""
-    active_session = active_session_var.get(None)
+    stmt = query_builder._statement
 
-    if is_async_context():
-        async def _execute_async():
-            if active_session:
-                result = await active_session.execute(query_builder._statement)
-                return result.scalars().first()
-            else:
-                db = _get_db_from_query(query_builder)
-                async with db.async_session_factory() as session:
-                    result = await session.execute(query_builder._statement)
-                    return result.scalars().first()
-        return _execute_async()
-    else:
-        if active_session:
-            result = active_session.execute(query_builder._statement)
-            return result.scalars().first()
-        else:
-            db = _get_db_from_query(query_builder)
-            with db.sync_session_factory() as session:
-                result = session.execute(query_builder._statement)
-                return result.scalars().first()
+    def _sync(session):
+        result = session.execute(stmt)
+        return result.scalars().first()
+
+    async def _async(session):
+        result = await session.execute(stmt)
+        return result.scalars().first()
+
+    return _run_with_session(
+        query_builder=query_builder,
+        work_sync=_sync,
+        work_async=_async,
+    )
 
 def _all(query_builder):
     """Handles fetching all records."""
-    active_session = active_session_var.get(None)
-    if is_async_context():
-        async def _execute_async():
-            if active_session:
-                result = await active_session.execute(query_builder._statement)
-                return result.scalars().all()
-            else:
-                db = _get_db_from_query(query_builder)
-                async with db.async_session_factory() as session:
-                    result = await session.execute(query_builder._statement)
-                    return result.scalars().all()
-        return _execute_async()
-    else:
-        if active_session:
-            result = active_session.execute(query_builder._statement)
-            return result.scalars().all()
-        else:
-            db = _get_db_from_query(query_builder)
-            with db.sync_session_factory() as session:
-                result = session.execute(query_builder._statement)
-                return result.scalars().all()
+    stmt = query_builder._statement
+
+    def _sync(session):
+        result = session.execute(stmt)
+        return result.scalars().all()
+
+    async def _async(session):
+        result = await session.execute(stmt)
+        return result.scalars().all()
+
+    return _run_with_session(
+        query_builder=query_builder,
+        work_sync=_sync,
+        work_async=_async,
+    )
 
 def _count(query_builder):
     """Handles counting the number of records for a query."""
-    active_session = active_session_var.get(None)
     count_stmt = func.count().select().select_from(query_builder._statement.alias("subquery"))
 
-    if is_async_context():
-        async def _execute_async():
-            if active_session:
-                result = await active_session.execute(count_stmt)
-                return result.scalar_one()
-            else:
-                db = _get_db_from_query(query_builder)
-                async with db.async_session_factory() as session:
-                    result = await session.execute(count_stmt)
-                    return result.scalar_one()
-        return _execute_async()
-    else:
-        if active_session:
-            result = active_session.execute(count_stmt)
-            return result.scalar_one()
-        else:
-            db = _get_db_from_query(query_builder)
-            with db.sync_session_factory() as session:
-                result = session.execute(count_stmt)
-                return result.scalar_one()
+    def _sync(session):
+        result = session.execute(count_stmt)
+        return result.scalar_one()
+
+    async def _async(session):
+        result = await session.execute(count_stmt)
+        return result.scalar_one()
+
+    return _run_with_session(
+        query_builder=query_builder,
+        work_sync=_sync,
+        work_async=_async,
+    )
 
 def _one(query_builder):
     """Fetches exactly one record, raising if zero or multiple are found."""
-    active_session = active_session_var.get(None)
     stmt = query_builder._statement.limit(2)
 
     def _handle_rows(rows):
@@ -125,183 +149,131 @@ def _one(query_builder):
             )
         return rows[0]
 
-    if is_async_context():
-        async def _execute_async():
-            if active_session:
-                result = await active_session.execute(stmt)
-            else:
-                db = _get_db_from_query(query_builder)
-                async with db.async_session_factory() as session:
-                    result = await session.execute(stmt)
-            rows = result.scalars().all()
-            return _handle_rows(rows)
-        return _execute_async()
-    else:
-        if active_session:
-            result = active_session.execute(stmt)
-        else:
-            db = _get_db_from_query(query_builder)
-            with db.sync_session_factory() as session:
-                result = session.execute(stmt)
+    def _sync(session):
+        result = session.execute(stmt)
         rows = result.scalars().all()
         return _handle_rows(rows)
 
+    async def _async(session):
+        result = await session.execute(stmt)
+        rows = result.scalars().all()
+        return _handle_rows(rows)
+
+    return _run_with_session(
+        query_builder=query_builder,
+        work_sync=_sync,
+        work_async=_async,
+    )
+
 def _exists(query_builder):
     """Returns True if the query matches at least one record."""
-    active_session = active_session_var.get(None)
     exists_stmt = select(query_builder._statement.exists())
-
-    if is_async_context():
-        async def _execute_async():
-            if active_session:
-                result = await active_session.execute(exists_stmt)
-            else:
-                db = _get_db_from_query(query_builder)
-                async with db.async_session_factory() as session:
-                    result = await session.execute(exists_stmt)
-            return bool(result.scalar())
-        return _execute_async()
-    else:
-        if active_session:
-            result = active_session.execute(exists_stmt)
-        else:
-            db = _get_db_from_query(query_builder)
-            with db.sync_session_factory() as session:
-                result = session.execute(exists_stmt)
+    def _sync(session):
+        result = session.execute(exists_stmt)
         return bool(result.scalar())
+
+    async def _async(session):
+        result = await session.execute(exists_stmt)
+        return bool(result.scalar())
+
+    return _run_with_session(
+        query_builder=query_builder,
+        work_sync=_sync,
+        work_async=_async,
+    )
 
 
 # --- WRITE OPERATIONS (Refactored) ---
 
 def _save(instance):
     """Handles saving (INSERT/UPDATE) a model instance."""
-    active_session = active_session_var.get(None)
+    def _sync(session):
+        session.add(instance)
+        session.flush()
 
-    if is_async_context():
-        async def _execute_async():
-            if active_session:
-                active_session.add(instance)
-                await active_session.flush()
-            else:
-                db = _get_db_from_instance(instance)
-                async with db.async_session_factory() as session:
-                    async with session.begin():
-                        session.add(instance)
-        return _execute_async()
-    else:
-        if active_session:
-            active_session.add(instance)
-            active_session.flush()
-        else:
-            db = _get_db_from_instance(instance)
-            with db.sync_session_factory() as session:
-                with session.begin():
-                    session.add(instance)
+    async def _async(session):
+        session.add(instance)
+        await session.flush()
+
+    return _run_with_session(
+        instance=instance,
+        transactional=True,
+        work_sync=_sync,
+        work_async=_async,
+    )
 
 def _delete_instance(instance):
     """Handles deleting a model instance."""
-    active_session = active_session_var.get(None)
+    def _sync(session):
+        session.delete(instance)
+        session.flush()
 
-    if is_async_context():
-        async def _execute_async():
-            if active_session:
-                active_session.delete(instance)
-                await active_session.flush()
-            else:
-                db = _get_db_from_instance(instance)
-                async with db.async_session_factory() as session:
-                    async with session.begin():
-                        session.delete(instance)
-        return _execute_async()
-    else:
-        if active_session:
-            active_session.delete(instance)
-            active_session.flush()
-        else:
-            db = _get_db_from_instance(instance)
-            with db.sync_session_factory() as session:
-                with session.begin():
-                    session.delete(instance)
+    async def _async(session):
+        session.delete(instance)
+        await session.flush()
+
+    return _run_with_session(
+        instance=instance,
+        transactional=True,
+        work_sync=_sync,
+        work_async=_async,
+    )
 
 def _bulk_create(cls, instances):
     """Handles bulk creating model instances."""
-    active_session = active_session_var.get(None)
+    def _sync(session):
+        session.add_all(instances)
+        session.flush()
 
-    if is_async_context():
-        async def _execute_async():
-            if active_session:
-                active_session.add_all(instances)
-                await active_session.flush()
-            else:
-                db = _get_db_from_class(cls)
-                async with db.async_session_factory() as session:
-                    async with session.begin():
-                        session.add_all(instances)
-        return _execute_async()
-    else:
-        if active_session:
-            active_session.add_all(instances)
-            active_session.flush()
-        else:
-            db = _get_db_from_class(cls)
-            with db.sync_session_factory() as session:
-                with session.begin():
-                    session.add_all(instances)
+    async def _async(session):
+        session.add_all(instances)
+        await session.flush()
+
+    return _run_with_session(
+        cls=cls,
+        transactional=True,
+        work_sync=_sync,
+        work_async=_async,
+    )
 
 def _update(query_builder, **values):
     """Handles bulk updates for a query."""
-    active_session = active_session_var.get(None)
     update_stmt = sa_update(query_builder._model_cls).values(**values)
     where_clause = query_builder._statement.whereclause
     if where_clause is not None:
         update_stmt = update_stmt.where(where_clause)
+    def _sync(session):
+        session.execute(update_stmt)
+        session.flush()
 
-    if is_async_context():
-        async def _execute_async():
-            if active_session:
-                await active_session.execute(update_stmt)
-                await active_session.flush()
-            else:
-                db = _get_db_from_query(query_builder)
-                async with db.async_session_factory() as session:
-                    async with session.begin():
-                        await session.execute(update_stmt)
-        return _execute_async()
-    else:
-        if active_session:
-            active_session.execute(update_stmt)
-            active_session.flush()
-        else:
-            db = _get_db_from_query(query_builder)
-            with db.sync_session_factory() as session:
-                with session.begin():
-                    session.execute(update_stmt)
+    async def _async(session):
+        await session.execute(update_stmt)
+        await session.flush()
+
+    return _run_with_session(
+        query_builder=query_builder,
+        transactional=True,
+        work_sync=_sync,
+        work_async=_async,
+    )
 
 def _delete(query_builder):
     """Handles bulk deletes for a query."""
-    active_session = active_session_var.get(None)
     delete_stmt = sa_delete(query_builder._model_cls)
     where_clause = query_builder._statement.whereclause
     if where_clause is not None:
         delete_stmt = delete_stmt.where(where_clause)
+    def _sync(session):
+        session.execute(delete_stmt)
+        session.flush()
 
-    if is_async_context():
-        async def _execute_async():
-            if active_session:
-                await active_session.execute(delete_stmt)
-                await active_session.flush()
-            else:
-                db = _get_db_from_query(query_builder)
-                async with db.async_session_factory() as session:
-                    async with session.begin():
-                        await session.execute(delete_stmt)
-        return _execute_async()
-    else:
-        if active_session:
-            active_session.execute(delete_stmt)
-            active_session.flush()
-        else:
-            db = _get_db_from_query(query_builder)
-            with db.sync_session_factory() as session:
-                with session.begin():
-                    session.execute(delete_stmt)
+    async def _async(session):
+        await session.execute(delete_stmt)
+        await session.flush()
+
+    return _run_with_session(
+        query_builder=query_builder,
+        transactional=True,
+        work_sync=_sync,
+        work_async=_async,
+    )

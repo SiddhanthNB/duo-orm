@@ -27,6 +27,7 @@ class Database:
         self._async_engine = None
         self._sync_session_factory = None
         self._async_session_factory = None
+        self._connected = False
 
         # --- This is the new "factory" logic ---
 
@@ -86,6 +87,20 @@ class Database:
                 expire_on_commit=False,
             )
         return self._async_session_factory
+
+    def connect(self):
+        """
+        Eagerly initialize engines and session factories to surface configuration errors early.
+        Safe to call multiple times.
+        """
+        if self._connected:
+            return
+        # Touch all factories so any misconfiguration (bad URL, missing driver, etc.) raises immediately.
+        _ = self.sync_engine
+        _ = self.async_engine
+        _ = self.sync_session_factory
+        _ = self.async_session_factory
+        self._connected = True
 
     @contextmanager
     def _sync_transaction_context(self):

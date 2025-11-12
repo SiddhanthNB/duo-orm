@@ -4,7 +4,7 @@ An opinionated, modern ORM for Python combining the power of SQLAlchemy 2.0 with
 
 ## Core Philosophy
 
-your-orm is built on a simple idea: you are in explicit control of the 'Unit of Work'. The API has two predictable modes:
+your-orm is built on a simple idea: you are in explicit control of the 'Unit of Work'. The API has two predictable modes and each `Database(...)` you instantiate manufactures its own `db.Model` base. Models from `db1.Model` and `db2.Model` stay isolated—even if they point to the same physical database—so you can safely manage multiple connections in one app (just keep each model hierarchy tied to its owning `db`).
 
 *   **Default Mode ("Statement-Driven"):** By default, every call (`.save()`, `.first()`) is its own "micro-transaction." The ORM creates a short-lived session that only knows about the single object you are operating on. It will predictably not see related objects, guaranteeing a simple, single-statement operation.
 
@@ -72,6 +72,8 @@ your-orm migration create "add users"
 ```
 
 The chosen path is written back to `pyproject.toml`, so future `your-orm migration ...` commands can omit `--dir`. Edit that stanza (or re-run `init --dir ...`) whenever you want to move the database stack.
+
+**Optional:** call `db.connect()` during application startup (after importing your generated `database.py`) if you want to surface misconfiguration or driver issues immediately rather than waiting for the first query/transaction.
 
 ### 3. Defining Models
 
@@ -196,7 +198,7 @@ async with db.standalone_session() as session:
 * `QueryBuilder.one()` – fetch exactly one record (raises `ObjectNotFoundError` / `MultipleObjectsFoundError` like SQLAlchemy).
 * `QueryBuilder.exists()` – returns `True/False` without materializing rows.
 * `QueryBuilder.paginate(limit, offset=0)` – oneliner to apply both LIMIT and OFFSET.
-* `QueryBuilder.related(User.posts, where=[...], aggregate="exists", loader="selectin")` – single entry point for filtering/aggregating/eager-loading across one relationship. Eager loading always happens (use `"selectin"` for collections, `"joined"` for scalars via the `loader` option).
+* `QueryBuilder.related(User.posts, where=[...], aggregate="exists", loader="selectin")` – single entry point for filtering/aggregating/eager-loading across one direct relationship. Calling `related()` multiple times or with multi-hop paths (e.g., `User.posts.comments`) isn’t supported; fall back to SQLAlchemy expressions for those cases.
 * `json(User.profile)["flags"]["beta"].is_null()` – Pythonic JSON-path helper that compiles to regular SQLAlchemy expressions, so you can write complex JSON predicates inside `.where(...)` without juggling driver-specific operators.
 * `array(User.tags).includes_any(["python", "orm"])` – expressive ARRAY helper for membership / superset / overlap checks without memorizing dialect-specific operators.
 * All helpers work in sync and async contexts just like `.first()` and `.all()`.
