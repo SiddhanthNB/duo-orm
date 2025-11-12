@@ -41,15 +41,37 @@ Run the `init` command to create the basic structure:
 
 ```bash
 your-orm init
-# or seed a stub models package that re-exports your models
-your-orm init --stub-models-init
 ```
 
-This will create:
+By default, scaffolding lands under `<project-root>/db/`:
 
-*   A `database.py` file to configure your database connection.
-*   A `models` directory to define your ORM models.
-*   A `migrations` directory for your database schema migrations.
+```
+db/
+├── database.py
+├── models/
+│   └── __init__.py
+└── migrations/
+    ├── alembic.ini
+    ├── env.py
+    ├── script.py.mako
+    └── versions/
+```
+
+`your-orm init` also creates (or updates) `<project-root>/pyproject.toml` so it contains:
+
+```toml
+[tool.your-orm]
+your_orm_dir = "db"
+```
+
+Need a different location? Pass `--dir` during init:
+
+```bash
+your-orm init --dir src/app/db_core
+your-orm migration create "add users"
+```
+
+The chosen path is written back to `pyproject.toml`, so future `your-orm migration ...` commands can omit `--dir`. Edit that stanza (or re-run `init --dir ...`) whenever you want to move the database stack.
 
 ### 3. Defining Models
 
@@ -72,8 +94,8 @@ class User(db.Model):
 Once you have defined your models, create a migration to apply the schema to your database:
 
 ```bash
-your-orm migrate create "initial models"
-your-orm migrate upgrade
+your-orm migration create "initial models"
+your-orm migration upgrade
 ```
 
 ### 5. Basic Usage
@@ -94,7 +116,7 @@ async def main():
     
     # More complex queries
     users = await User.where(
-        (User.age > 30) & (User.name.startswith_('A'))
+        (User.age > 30) & User.name.startswith('A')
     ).all()
 
     # Updates
