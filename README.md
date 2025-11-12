@@ -2,7 +2,7 @@
 
 An opinionated, modern ORM for Python combining the power of SQLAlchemy 2.0 with a clean, symmetrical API for sync and async operations.
 
-## ⚙️ Core Philosophy
+## Core Philosophy
 
 your-orm is built on a simple idea: you are in explicit control of the 'Unit of Work'. The API has two predictable modes:
 
@@ -12,7 +12,7 @@ your-orm is built on a simple idea: you are in explicit control of the 'Unit of 
 
 **Philosophy:** Clarity over cleverness. The 'magic' of state-tracking only happens when you explicitly ask for it.
 
-## 🧩 Session & Transaction Model
+## Session & Transaction Model
 
 There is no autosession detection logic. By default each ORM call opens a connection, runs exactly one SQL statement, commits (for writes), and closes. When you need multi-step or related work to behave atomically, you wrap it in an explicit transaction block:
 
@@ -25,7 +25,7 @@ async with db.transaction():
 
 Inside the block your code automatically shares a single session. The block commits when it exits successfully and rolls back on error, giving you predictable Unit-of-Work semantics only when you opt-in.
 
-## 🚀 Getting Started
+## Getting Started
 
 ### 1. Installation
 
@@ -130,7 +130,7 @@ if __name__ == "__main__":
     asyncio.run(main())
 ```
 
-## 🔁 Framework Integration
+## Framework Integration
 
 your-orm plays well with FastAPI (and any async framework) by wrapping each request in a dependency that opens a transaction block:
 
@@ -151,7 +151,7 @@ async def read_user(user_id: int, _=Depends(db_session)):
 
 All queries issued inside the request share the same session; pending writes persist until the response and exceptions roll the block back automatically.
 
-## 🧰 Power User Access
+## Power User Access
 
 When you need raw SQLAlchemy control, opt into a standalone session:
 
@@ -163,7 +163,7 @@ async with db.standalone_session() as session:
 
 `db.standalone_session()` returns a plain `AsyncSession`, so you can use Core queries, streaming, or bulk inserts without leaving the your-orm ecosystem.
 
-## 🧭 Behaviour Summary
+## Behaviour Summary
 
 | Context | Session lifetime | Commit model | Typical use |
 | --- | --- | --- | --- |
@@ -171,7 +171,7 @@ async with db.standalone_session() as session:
 | `db.transaction()` block | Shared for the block | Commit on exit, rollback on error | Web requests, multi-step workflows |
 | `db.standalone_session()` | Manual | You commit / rollback | Power users, raw SQLAlchemy |
 
-## 🎯 Developer Experience Principles
+## Developer Experience Principles
 
 * **Simple:** `await Model.query()` just works—no session juggling for one-off calls.
 * **Safe:** One statement per operation unless you explicitly opt into a transaction.
@@ -179,7 +179,7 @@ async with db.standalone_session() as session:
 * **Predictable:** No hidden flushes, dirty graphs, or autosession guessing.
 * **Framework-agnostic:** Works the same in FastAPI, CLIs, scripts, or the REPL.
 
-## 🧪 Validation & Model Flags
+## Validation & Model Flags
 
 * `Model.validate()` – override this hook to enforce business rules; raise `ValidationError(field="age", message)` to block `save()`/`bulk_create()`.
 * `Model.fields()` – returns the tuple of column names defined on the model so you can introspect schemas at runtime.
@@ -191,7 +191,7 @@ async with db.standalone_session() as session:
   updated_at = mapped_column(DateTime(timezone=True), info={"set_on": {"create", "update"}})
   ```
 
-## 🔍 Query Enhancements
+## Query Enhancements
 
 * `QueryBuilder.one()` – fetch exactly one record (raises `ObjectNotFoundError` / `MultipleObjectsFoundError` like SQLAlchemy).
 * `QueryBuilder.exists()` – returns `True/False` without materializing rows.
@@ -201,11 +201,11 @@ async with db.standalone_session() as session:
 * `array(User.tags).includes_any(["python", "orm"])` – expressive ARRAY helper for membership / superset / overlap checks without memorizing dialect-specific operators.
 * All helpers work in sync and async contexts just like `.first()` and `.all()`.
 
-## 🧠 Why SQLAlchemy Underneath?
+## Why SQLAlchemy Underneath?
 
 your-orm stands on SQLAlchemy Core for query generation, schema metadata, type handling, and async engines. It deliberately avoids SQLAlchemy’s ORM layer so it stays lightweight, async-first, and free from invisible Unit-of-Work behavior. When you need to drop down, you already have a real `AsyncSession` in hand.
 
-## 📖 Query Operators
+## Query Operators
 
 ### Basic Comparison
 
@@ -282,16 +282,27 @@ Helper methods map directly to common set-style checks:
 
 These helpers return SQLAlchemy expressions, so they compose with the rest of your filters exactly like built-in clauses. SQLAlchemy/dialect support rules still apply—unsupported ARRAY operators raise the driver’s error (or the helper re-raises with a clearer message).
 
-### Relationship Operators
-
-| Method | Example |
-| --- | --- |
-| `.any_(expr=None)` | `User.posts.any_(Post.views > 1000)` |
-| `.all_(expr)` | `User.posts.all_(Post.status == 'draft')` |
-
 ### Logical Combinators
 
 | Operator | Example |
 | --- | --- |
 | `&` | `(User.age > 30) & (User.status == 'active')` |
 | `|` | `(User.is_staff == True) | (User.is_admin == True)` |
+
+### Sync scripts or workers
+
+The same `db.transaction()` helper can be used in synchronous code—just drop the `await` and use a plain `with`:
+
+```python
+from .database import db
+from .models import User
+
+with db.transaction():
+    user = User(name="sync-flow")
+    user.save()
+
+with db.transaction():
+    assert User.where(User.name == "sync-flow").exists()
+```
+
+Behind the scenes we detect whether you’re in an event loop and return either the async or sync context manager automatically, so you get one API for both worlds.
