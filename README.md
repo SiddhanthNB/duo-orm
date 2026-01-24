@@ -1,5 +1,8 @@
 # DuoORM
 
+[![PyPI version](https://img.shields.io/pypi/v/py-queue-bus.svg?cacheSeconds=300)](https://pypi.org/project/duo-orm/)
+[![Python versions](https://img.shields.io/pypi/pyversions/duo-orm.svg?cacheSeconds=300)](https://pypi.org/project/duo-orm/)
+
 An opinionated, modern ORM for Python combining the power of SQLAlchemy 2.0 with a clean, symmetrical API for sync and async operations.
 
 ## Core Philosophy

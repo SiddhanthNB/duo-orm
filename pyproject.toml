@@ -10,7 +10,7 @@ build-backend = "setuptools.build_meta"
 name = "duo-orm"
 version = "0.1.0"
 authors = [
-  { name="Your Name", email="you@example.com" },
+  { name="Siddhanth Bhimakari", email="siddhanth.n.b@gmail.com" },
 ]
 description = "An opinionated, modern ORM for Python combining the power of SQLAlchemy 2.0 with a clean, symmetrical API for sync and async operations."
 readme = "README.md"
@@ -35,8 +35,8 @@ dependencies = [
 ]
 
 [project.urls]
-"Homepage" = "https://github.com/example/duo-orm"
-"Bug Tracker" = "https://github.com/example/duo-orm/issues"
+"Homepage" = "https://github.com/SiddhanthNB/duo-orm"
+"Bug Tracker" = "https://github.com/SiddhanthNB/duo-orm/issues"
 
 # This section creates the `duo-orm` command-line tool.
 # It points to the main `cli` group function inside our cli.py file.
