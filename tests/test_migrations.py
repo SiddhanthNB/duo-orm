@@ -8,8 +8,8 @@ import pytest
 import toml
 from click.testing import CliRunner
 
-from your_orm.migrations.cli import cli
-from your_orm.migrations.config import (
+from duo_orm.migrations.cli import cli
+from duo_orm.migrations.config import (
     DB_OBJECT_NAME,
     _generate_files,
     _normalize_dir,
@@ -17,7 +17,7 @@ from your_orm.migrations.config import (
     _resolve_layout,
     get_alembic_config,
 )
-from your_orm.exceptions import ConfigurationError
+from duo_orm.exceptions import ConfigurationError
 
 
 def test_normalize_dir_rejects_bad_segments():
@@ -48,7 +48,7 @@ def test_persist_pyproject_config(tmp_path):
 
     _persist_pyproject_config(project_root, "custom/db")
     contents = toml.load(project_root / "pyproject.toml")
-    assert contents["tool"]["your-orm"]["your_orm_dir"] == "custom/db"
+    assert contents["tool"]["duo-orm"]["duo_orm_dir"] == "custom/db"
 
 
 def test_get_alembic_config_loads_db(monkeypatch, tmp_path):
@@ -56,7 +56,7 @@ def test_get_alembic_config_loads_db(monkeypatch, tmp_path):
     project.mkdir()
 
     pyproject_path = project / "pyproject.toml"
-    pyproject_path.write_text(toml.dumps({"tool": {"your-orm": {"your_orm_dir": "db"}}}))
+    pyproject_path.write_text(toml.dumps({"tool": {"duo-orm": {"duo_orm_dir": "db"}}}))
 
     db_package = project / "db"
     db_package.mkdir()
@@ -64,7 +64,7 @@ def test_get_alembic_config_loads_db(monkeypatch, tmp_path):
 
     db_file = db_package / "database.py"
     db_file.write_text(
-        "from your_orm import Database\n"
+        "from duo_orm import Database\n"
         f"db = Database('sqlite:///{project / 'config.sqlite'}')\n"
     )
 
@@ -115,11 +115,11 @@ def test_cli_migration_commands_dispatch(monkeypatch, tmp_path):
     def fake_history(cfg):
         called["history"] = cfg
 
-    monkeypatch.setattr("your_orm.migrations.cli.get_alembic_config", fake_get_cfg)
-    monkeypatch.setattr("your_orm.migrations.cli.command.revision", fake_revision)
-    monkeypatch.setattr("your_orm.migrations.cli.command.upgrade", fake_upgrade)
-    monkeypatch.setattr("your_orm.migrations.cli.command.downgrade", fake_downgrade)
-    monkeypatch.setattr("your_orm.migrations.cli.command.history", fake_history)
+    monkeypatch.setattr("duo_orm.migrations.cli.get_alembic_config", fake_get_cfg)
+    monkeypatch.setattr("duo_orm.migrations.cli.command.revision", fake_revision)
+    monkeypatch.setattr("duo_orm.migrations.cli.command.upgrade", fake_upgrade)
+    monkeypatch.setattr("duo_orm.migrations.cli.command.downgrade", fake_downgrade)
+    monkeypatch.setattr("duo_orm.migrations.cli.command.history", fake_history)
 
     runner = CliRunner()
     base = tmp_path / "proj"
@@ -149,7 +149,7 @@ def test_cli_commands_error_path(monkeypatch, tmp_path):
     def bad_get_cfg(override_dir=None):
         raise ConfigurationError("boom")
 
-    monkeypatch.setattr("your_orm.migrations.cli.get_alembic_config", bad_get_cfg)
+    monkeypatch.setattr("duo_orm.migrations.cli.get_alembic_config", bad_get_cfg)
     runner = CliRunner()
     base = tmp_path / "proj"
     base.mkdir()

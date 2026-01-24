@@ -1,10 +1,10 @@
-# your-orm
+# DuoORM
 
 An opinionated, modern ORM for Python combining the power of SQLAlchemy 2.0 with a clean, symmetrical API for sync and async operations.
 
 ## Core Philosophy
 
-your-orm is built on a simple idea: you are in explicit control of the 'Unit of Work'. The API has two predictable modes and each `Database(...)` you instantiate manufactures its own `db.Model` base. Models from `db1.Model` and `db2.Model` stay isolated—even if they point to the same physical database—so you can safely manage multiple connections in one app (just keep each model hierarchy tied to its owning `db`).
+DuoORM is built on a simple idea: you are in explicit control of the 'Unit of Work'. The API has two predictable modes and each `Database(...)` you instantiate manufactures its own `db.Model` base. Models from `db1.Model` and `db2.Model` stay isolated—even if they point to the same physical database—so you can safely manage multiple connections in one app (just keep each model hierarchy tied to its owning `db`).
 
 *   **Default Mode ("Statement-Driven"):** By default, every call (`.save()`, `.first()`) is its own "micro-transaction." The ORM creates a short-lived session that only knows about the single object you are operating on. It will predictably not see related objects, guaranteeing a simple, single-statement operation.
 
@@ -29,18 +29,18 @@ Inside the block your code automatically shares a single session. The block comm
 
 ### 1. Installation
 
-Drivers are managed automatically. Supply only base dialect URLs (e.g., `postgresql://...`, `mysql://...`, `sqlite:///file.db`) — do **not** include `+driver`; we inject the correct sync/async driver for you.
+Drivers are managed automatically. Supply only base dialect URLs (e.g., `postgresql://...`, `mysql://...`, `sqlite:///file.db`) — do **not** include `+driver`; we inject the correct sync/async driver for you. If you pass extra query parameters that your DBAPI rejects, the error will surface directly from the driver so you can fix the URL.
 
 ```bash
 # Default: install with SQLite support (stdlib sqlite3 + aiosqlite)
-pip install your-orm
+pip install duo-orm
 
 # Optional: install only the drivers you need
-pip install your-orm[postgresql]           # psycopg (sync+async)
-pip install your-orm[mysql]                # pymysql (sync) + asyncmy (async)
-pip install your-orm[mssql]                # pyodbc (sync) + aioodbc (async)
-pip install your-orm[oracle]               # python-oracledb (sync+async)
-pip install your-orm[all]                  # explicitly install everything
+pip install duo-orm[postgresql]           # psycopg (sync+async)
+pip install duo-orm[mysql]                # pymysql (sync) + asyncmy (async)
+pip install duo-orm[mssql]                # pyodbc (sync) + aioodbc (async)
+pip install duo-orm[oracle]               # oracledb (sync+async)
+pip install duo-orm[all]                  # explicitly install everything
 ```
 Need a stdlib SQLite fallback? See the SQLite note below:
 
@@ -55,14 +55,16 @@ Need a stdlib SQLite fallback? See the SQLite note below:
 > ```
 > This makes `import sqlite3` use the binary fallback.
 
-Async derivation uses the async driver for your dialect (psycopg for Postgres, asyncmy for MySQL, aioodbc for MSSQL, aiosqlite for SQLite). If the async driver isn’t installed, async calls will fail—install the matching extra above or `your-orm[all]`.
+Async derivation uses the async driver for your dialect (psycopg for Postgres, asyncmy for MySQL, aioodbc for MSSQL, aiosqlite for SQLite). If the async driver isn’t installed, async calls will fail—install the matching extra above or `duo-orm[all]`.
+
+DuoORM rides on SQLAlchemy’s dialect support. Features are available per backend only if SQLAlchemy exposes them (e.g., full JSON/ARRAY helpers on PostgreSQL; other dialects allow JSON storage but not the richer operators, so related tests are skipped with a reason).
 
 ### 2. Initialization
 
 Run the `init` command to create the basic structure:
 
 ```bash
-your-orm init
+duo-orm init
 ```
 
 By default, scaffolding lands under `<project-root>/db/`:
@@ -79,21 +81,21 @@ db/
     └── versions/
 ```
 
-`your-orm init` also creates (or updates) `<project-root>/pyproject.toml` so it contains:
+`duo-orm init` also creates (or updates) `<project-root>/pyproject.toml` so it contains:
 
 ```toml
-[tool.your-orm]
-your_orm_dir = "db"
+[tool.duo-orm]
+duo_orm_dir = "db"
 ```
 
 Need a different location? Pass `--dir` during init:
 
 ```bash
-your-orm init --dir src/app/db_core
-your-orm migration create "add users"
+duo-orm init --dir src/app/db_core
+duo-orm migration create "add users"
 ```
 
-The chosen path is written back to `pyproject.toml`, so future `your-orm migration ...` commands can omit `--dir`. Edit that stanza (or re-run `init --dir ...`) whenever you want to move the database stack.
+The chosen path is written back to `pyproject.toml`, so future `duo-orm migration ...` commands can omit `--dir`. Edit that stanza (or re-run `init --dir ...`) whenever you want to move the database stack.
 
 **Optional:** call `db.connect()` during application startup (after importing your generated `database.py`) if you want to surface misconfiguration or driver issues immediately rather than waiting for the first query/transaction.
 
@@ -104,7 +106,7 @@ Define your models in the `models` directory, inheriting from `db.Model`:
 ```python
 # models/user.py
 from ..database import db
-from your_orm import Mapped, mapped_column
+from duo_orm import Mapped, mapped_column
 
 class User(db.Model):
     __tablename__ = "users"
@@ -118,8 +120,8 @@ class User(db.Model):
 Once you have defined your models, create a migration to apply the schema to your database:
 
 ```bash
-your-orm migration create "initial models"
-your-orm migration upgrade
+duo-orm migration create "initial models"
+duo-orm migration upgrade
 ```
 
 ### 5. Basic Usage
@@ -156,7 +158,7 @@ if __name__ == "__main__":
 
 ## Framework Integration
 
-your-orm plays well with FastAPI (and any async framework) by wrapping each request in a dependency that opens a transaction block:
+DuoORM plays well with FastAPI (and any async framework) by wrapping each request in a dependency that opens a transaction block:
 
 ```python
 from fastapi import Depends, FastAPI
@@ -185,7 +187,7 @@ async with db.standalone_session() as session:
     rows = (await session.scalars(stmt)).all()
 ```
 
-`db.standalone_session()` returns a plain `AsyncSession`, so you can use Core queries, streaming, or bulk inserts without leaving the your-orm ecosystem.
+`db.standalone_session()` returns a plain `AsyncSession`, so you can use Core queries, streaming, or bulk inserts without leaving the DuoORM ecosystem.
 
 ## Behaviour Summary
 
@@ -227,7 +229,7 @@ async with db.standalone_session() as session:
 
 ## Why SQLAlchemy Underneath?
 
-your-orm stands on SQLAlchemy Core for query generation, schema metadata, type handling, and async engines. It deliberately avoids SQLAlchemy’s ORM layer so it stays lightweight, async-first, and free from invisible Unit-of-Work behavior. When you need to drop down, you already have a real `AsyncSession` in hand.
+DuoORM stands on SQLAlchemy Core for query generation, schema metadata, type handling, and async engines. It deliberately avoids SQLAlchemy’s ORM layer so it stays lightweight, async-first, and free from invisible Unit-of-Work behavior. When you need to drop down, you already have a real `AsyncSession` in hand.
 
 ## Query Operators
 
@@ -254,14 +256,14 @@ your-orm stands on SQLAlchemy Core for query generation, schema metadata, type h
 | `.istartswith(prefix)` | `User.name.istartswith('al')` |
 | `.iendswith(suffix)` | `User.slug.iendswith('-beta')` |
 
-Case-insensitive helpers (`.icontains`, `.istartswith`, `.iendswith`) are provided by your-orm and work on any column whose SQLAlchemy type derives from `String`. For custom wildcard patterns you can still fall back to SQLAlchemy’s `.like()` / `.ilike()`, but the ergonomic helpers cover 80% of real-world use.
+Case-insensitive helpers (`.icontains`, `.istartswith`, `.iendswith`) are provided by DuoORM and work on any column whose SQLAlchemy type derives from `String`. For custom wildcard patterns you can still fall back to SQLAlchemy’s `.like()` / `.ilike()`, but the ergonomic helpers cover 80% of real-world use.
 
 ### JSON Path Helper
 
 Use the built-in `json()` helper to compose JSON predicates that drop straight into `where()`:
 
 ```python
-from your_orm import json
+from duo_orm import json
 
 await User.where(
     json(User.profile)["flags"]["beta"].is_null() |
@@ -282,12 +284,14 @@ It mirrors normal Python dict access (`[...]`) and exposes fluent helpers that e
 
 Because the helper returns ordinary SQLAlchemy expressions, you can combine them with `&`, `|`, `not_`, nest them alongside other filters, and even extract the raw expression via `.expression()`. Dialect support is enforced by SQLAlchemy—if the backend lacks a JSON operator (e.g., `has_key` on SQLite), you’ll get a clear error at query construction time.
 
+> Practical note: full JSON path/operator helpers are available on PostgreSQL today. Other dialects store JSON fine but lack operator parity, so related tests are skipped with an explicit reason until dialect-specific compilers are added.
+
 ### Array Helper
 
 For ARRAY columns, reach for the `array()` helper:
 
 ```python
-from your_orm import array
+from duo_orm import array
 
 await User.where(
     array(User.tags).includes("orm") &
@@ -305,6 +309,8 @@ Helper methods map directly to common set-style checks:
 | `.length()` | Number of elements (uses `cardinality()` when available, otherwise `array_length(..., 1)`). | `array(User.tags).length() > 2` |
 
 These helpers return SQLAlchemy expressions, so they compose with the rest of your filters exactly like built-in clauses. SQLAlchemy/dialect support rules still apply—unsupported ARRAY operators raise the driver’s error (or the helper re-raises with a clearer message).
+
+> Practical note: ARRAY helpers are PostgreSQL-only right now; other dialects do not expose compatible ARRAY operators. Tests are skipped with a reason when the backend lacks support.
 
 ### Logical Combinators
 
@@ -330,3 +336,14 @@ with db.transaction():
 ```
 
 Behind the scenes we detect whether you’re in an event loop and return either the async or sync context manager automatically, so you get one API for both worlds.
+
+## Testing
+
+The test suite expects an explicit `--db-url` and never falls back to a default. Run tests against the backend you care about, for example:
+
+```bash
+pytest --db-url "sqlite:///./test.sqlite"
+pytest --db-url "postgresql://user:pass@host:5432/dbname"
+```
+
+JSON/ARRAY helper tests are skipped with explicit reasons on dialects that lack SQLAlchemy operator support.

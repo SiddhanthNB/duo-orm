@@ -1,7 +1,7 @@
-# your_orm/__init__.py
+# duo_orm/__init__.py
 
 """
-your-orm: An opinionated, modern ORM for Python.
+DuoORM: An opinionated, modern ORM for Python.
 
 This package provides a clean, symmetrical API for synchronous and
 asynchronous database operations, built on SQLAlchemy 2.0.

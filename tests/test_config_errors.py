@@ -5,12 +5,12 @@ from pathlib import Path
 
 import pytest
 
-from your_orm.migrations.config import get_alembic_config, DB_OBJECT_NAME, _get_config, _persist_pyproject_config
-from your_orm.exceptions import ConfigurationError
+from duo_orm.migrations.config import get_alembic_config, DB_OBJECT_NAME, _get_config, _persist_pyproject_config
+from duo_orm.exceptions import ConfigurationError
 
 
-def _write_pyproject(root: Path, your_orm_dir: str = "db"):
-    (root / "pyproject.toml").write_text(toml.dumps({"tool": {"your-orm": {"your_orm_dir": your_orm_dir}}}))
+def _write_pyproject(root: Path, duo_orm_dir: str = "db"):
+    (root / "pyproject.toml").write_text(toml.dumps({"tool": {"duo-orm": {"duo_orm_dir": duo_orm_dir}}}))
 
 
 def test_missing_db_object_raises_configuration_error(tmp_path, monkeypatch):
@@ -56,7 +56,7 @@ def test_version_table_defaults_to_repo_name(tmp_path, monkeypatch):
     db_dir.mkdir()
     (db_dir / "__init__.py").write_text("")
     (db_dir / "database.py").write_text(
-        "from your_orm import Database\n"
+        "from duo_orm import Database\n"
         f"db = Database('sqlite:///{project / 'default.sqlite'}')\n"
     )
 
@@ -74,14 +74,14 @@ def test_version_table_can_be_overridden_in_pyproject(tmp_path, monkeypatch):
     project = tmp_path / "proj"
     project.mkdir()
     (project / "pyproject.toml").write_text(
-        toml.dumps({"tool": {"your-orm": {"your_orm_dir": "db", "version_table": "custom_table"}}})
+        toml.dumps({"tool": {"duo-orm": {"duo_orm_dir": "db", "version_table": "custom_table"}}})
     )
 
     db_dir = project / "db"
     db_dir.mkdir()
     (db_dir / "__init__.py").write_text("")
     (db_dir / "database.py").write_text(
-        "from your_orm import Database\n"
+        "from duo_orm import Database\n"
         f"db = Database('sqlite:///{project / 'override.sqlite'}')\n"
     )
 
@@ -96,9 +96,9 @@ def test_persist_pyproject_preserves_version_table(tmp_path):
     project = tmp_path / "proj"
     project.mkdir()
     pyproject = project / "pyproject.toml"
-    pyproject.write_text(toml.dumps({"tool": {"your-orm": {"version_table": "keep_me"}}}))
+    pyproject.write_text(toml.dumps({"tool": {"duo-orm": {"version_table": "keep_me"}}}))
 
     _persist_pyproject_config(project, "db/path", "keep_me")
     loaded = toml.load(pyproject)
-    assert loaded["tool"]["your-orm"]["your_orm_dir"] == "db/path"
-    assert loaded["tool"]["your-orm"]["version_table"] == "keep_me"
+    assert loaded["tool"]["duo-orm"]["duo_orm_dir"] == "db/path"
+    assert loaded["tool"]["duo-orm"]["version_table"] == "keep_me"

@@ -1,4 +1,4 @@
-# your_orm/session.py
+# duo_orm/session.py
 
 import asyncio
 from contextvars import ContextVar

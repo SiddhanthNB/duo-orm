@@ -1,4 +1,4 @@
-# your_orm/migrations/cli.py
+# duo_orm/migrations/cli.py
 
 import click
 from alembic import command
@@ -12,12 +12,12 @@ from .config import (
     DB_OBJECT_NAME,
     load_template,
 )
-from your_orm.exceptions import ConfigurationError
+from duo_orm.exceptions import ConfigurationError
 
 # 1. Main CLI group
 @click.group()
 def cli():
-    """The main entry point for the your-orm CLI."""
+    """The main entry point for the duo-orm CLI."""
     pass
 
 # 2. New top-level 'init' command
@@ -33,7 +33,7 @@ def init(orm_dir):
     click.echo("-> Initializing complete database structure...")
     try:
         project_root, config = _get_config(override_dir=orm_dir)
-        relative_dir = config["your_orm_dir"]
+        relative_dir = config["duo_orm_dir"]
         base_dir, migrations_dir, module_path = _resolve_layout(project_root, relative_dir)
 
         # --- Scaffolding logic ---
@@ -76,10 +76,10 @@ def init(orm_dir):
         click.secho("\nProject initialization complete!", fg="green")
         click.echo("Next steps:")
         click.echo(f"1. Define your models in the '{models_dir}' directory.")
-        click.echo("2. Run 'your-orm migration create \"initial models\"' to create your first migration.")
+        click.echo("2. Run 'duo-orm migration create \"initial models\"' to create your first migration.")
 
     except Exception as e:
-        click.secho(f"Error during initialization: {e}", fg="red", err=True)
+        raise click.ClickException(f"Error during initialization: {e}")
 
 
 # 3. 'migration' subcommand group
@@ -105,7 +105,7 @@ def create(message, orm_dir):
         command.revision(alembic_cfg, message=message, autogenerate=True)
         click.secho("✅ New migration file created.", fg="green")
     except (CommandError, ConfigurationError) as e:
-        click.secho(f"Error creating migration: {e}", fg="red")
+        raise click.ClickException(f"Error creating migration: {e}")
 
 
 @migration_group.command()
@@ -124,26 +124,28 @@ def upgrade(revision, orm_dir):
         command.upgrade(alembic_cfg, revision)
         click.secho("✅ Migrations applied successfully.", fg="green")
     except (CommandError, ConfigurationError) as e:
-        click.secho(f"Error applying migrations: {e}", fg="red")
+        raise click.ClickException(f"Error applying migrations: {e}")
 
 
-@migration_group.command()
-@click.argument("revision", default="-1")
+@migration_group.command(context_settings={"ignore_unknown_options": True, "allow_extra_args": True})
+@click.argument("revision", default=None, required=False)
 @click.option(
     "--dir",
     "orm_dir",
     default=None,
     help="Override the target directory (defaults to db/ or pyproject config).",
 )
-def downgrade(revision, orm_dir):
+@click.pass_context
+def downgrade(ctx, revision, orm_dir):
     """Reverts migrations."""
+    revision = revision or (ctx.args[0] if ctx.args else "-1")
     click.echo(f"-> Downgrading migrations to revision: {revision}")
     try:
         alembic_cfg = get_alembic_config(override_dir=orm_dir)
         command.downgrade(alembic_cfg, revision)
         click.secho("✅ Migrations reverted successfully.", fg="green")
     except (CommandError, ConfigurationError) as e:
-        click.secho(f"Error reverting migrations: {e}", fg="red")
+        raise click.ClickException(f"Error reverting migrations: {e}")
 
 
 @migration_group.command()
@@ -159,4 +161,4 @@ def history(orm_dir):
         alembic_cfg = get_alembic_config(override_dir=orm_dir)
         command.history(alembic_cfg)
     except (CommandError, ConfigurationError) as e:
-        click.secho(f"Error showing history: {e}", fg="red")
+        raise click.ClickException(f"Error showing history: {e}")

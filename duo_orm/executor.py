@@ -1,6 +1,6 @@
-# your_orm/executor.py
+# duo_orm/executor.py
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, literal
 from sqlalchemy import delete as sa_delete
 from sqlalchemy import update as sa_update
 
@@ -88,11 +88,11 @@ def _first(query_builder):
 
     def _sync(session):
         result = session.execute(stmt)
-        return result.scalars().first()
+        return result.unique().scalars().first()
 
     async def _async(session):
         result = await session.execute(stmt)
-        return result.scalars().first()
+        return result.unique().scalars().first()
 
     return _run_with_session(
         query_builder=query_builder,
@@ -106,11 +106,11 @@ def _all(query_builder):
 
     def _sync(session):
         result = session.execute(stmt)
-        return result.scalars().all()
+        return result.unique().scalars().all()
 
     async def _async(session):
         result = await session.execute(stmt)
-        return result.scalars().all()
+        return result.unique().scalars().all()
 
     return _run_with_session(
         query_builder=query_builder,
@@ -151,12 +151,12 @@ def _one(query_builder):
 
     def _sync(session):
         result = session.execute(stmt)
-        rows = result.scalars().all()
+        rows = result.unique().scalars().all()
         return _handle_rows(rows)
 
     async def _async(session):
         result = await session.execute(stmt)
-        rows = result.scalars().all()
+        rows = result.unique().scalars().all()
         return _handle_rows(rows)
 
     return _run_with_session(
@@ -167,7 +167,10 @@ def _one(query_builder):
 
 def _exists(query_builder):
     """Returns True if the query matches at least one record."""
-    exists_stmt = select(query_builder._statement.exists())
+    exists_expr = query_builder._statement.exists()
+    # SQL Server (and some dialects) do not support `SELECT EXISTS (...)` directly.
+    # Use `SELECT 1 WHERE EXISTS (...)` which is portable.
+    exists_stmt = select(literal(True)).where(exists_expr).limit(1)
     def _sync(session):
         result = session.execute(exists_stmt)
         return bool(result.scalar())

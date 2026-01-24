@@ -1,35 +1,32 @@
 import os
-import tempfile
+import asyncio
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Iterable, List, Tuple
+from typing import Dict, List, Tuple
 
 import pytest
+import pytest_asyncio
 import subprocess
 import textwrap
 from sqlalchemy import event, text
 from sqlalchemy.engine import make_url
+from sqlalchemy.exc import NoSuchModuleError
 
-from your_orm import Database
+from duo_orm import Database
+from duo_orm.db import _DIALECT_ALIASES
 
 
 def pytest_addoption(parser):
     """
-    Allow users to supply multiple database URLs when running the suite:
-      pytest --db-url sqlite:///./db.sqlite --db-url mysql+aiomysql://user:pass@localhost/db
-    Defaults fall back to temporary SQLite files so the suite is runnable out of the box.
+    Require a single database URL for the suite:
+      pytest --db-url sqlite:///./db.sqlite
     """
     parser.addoption(
         "--db-url",
-        action="append",
-        default=[],
-        help="Database URL(s) for sync tests. Use dialect=url to label (e.g., postgres=postgresql+psycopg://...). Can be passed multiple times.",
+        action="store",
+        default=None,
+        help="Database URL for sync/async tests. Optional dialect=url label is allowed (e.g., postgres=postgresql+psycopg://...).",
     )
-
-
-def _default_sqlite_url(prefix: str) -> str:
-    tmp_dir = Path(tempfile.mkdtemp(prefix=prefix))
-    return f"sqlite:///{tmp_dir / 'test.sqlite'}"
 
 
 @dataclass(frozen=True)
@@ -55,13 +52,20 @@ def _write(path: Path, content: str):
 def _infer_capabilities(url: str) -> DbTarget:
     parsed = make_url(url)
     drivername = parsed.drivername.lower()
-    dialect = parsed.get_backend_name() or drivername.split("+", 1)[0]
-    driver = parsed.get_driver_name() or drivername
+    base = parsed.get_backend_name() or drivername.split("+", 1)[0]
+    canonical = _DIALECT_ALIASES.get(base, base)
+    dialect = canonical
+    try:
+        driver = parsed.get_driver_name()
+    except NoSuchModuleError:
+        driver = None
+    driver = driver or canonical
 
     async_tokens = ("async", "aiomysql", "aiosqlite", "asyncpg", "oracledb_async")
     is_async = any(token in driver for token in async_tokens) or "+aiosqlite" in drivername
 
-    supports_json = dialect in {"postgresql", "mysql", "mariadb", "oracle"}
+    # Only mark dialects with well-tested JSON operator support.
+    supports_json = dialect in {"postgresql"}
     supports_array = dialect in {"postgresql"}
     supports_has_key = dialect in {"postgresql"}
 
@@ -77,7 +81,10 @@ def _infer_capabilities(url: str) -> DbTarget:
 
 
 def _parse_kv(entry: str) -> Tuple[str | None, str]:
-    if "=" in entry:
+    eq_pos = entry.find("=")
+    scheme_pos = entry.find("://")
+    # Only treat as labeled (dialect=url) if the '=' appears before any scheme delimiter.
+    if eq_pos != -1 and (scheme_pos == -1 or eq_pos < scheme_pos):
         key, value = entry.split("=", 1)
         return key.strip() or None, value.strip()
     return None, entry.strip()
@@ -85,13 +92,11 @@ def _parse_kv(entry: str) -> Tuple[str | None, str]:
 
 def _collect_targets(
     *,
-    cli_values: List[str],
-    env_value: str,
-    default_urls: Iterable[str],
+    cli_value: str | None,
 ) -> List[DbTarget]:
-    raw_entries = [entry for entry in cli_values if entry.strip()]
-    env_entries = [entry for entry in env_value.split(",") if entry.strip()]
-    raw_entries.extend(env_entries)
+    raw_entries = []
+    if cli_value:
+        raw_entries.append(cli_value)
 
     targets: Dict[str, DbTarget] = {}
 
@@ -101,9 +106,7 @@ def _collect_targets(
         targets[target.label] = target
 
     if not targets:
-        for url in default_urls:
-            target = _infer_capabilities(url)
-            targets[target.label] = target
+        raise pytest.UsageError("Missing required --db-url. Example: pytest --db-url sqlite:///./test.sqlite")
 
     return list(targets.values())
 
@@ -115,9 +118,7 @@ def pytest_generate_tests(metafunc):
     """
     if "db_target" in metafunc.fixturenames:
         targets = _collect_targets(
-            cli_values=metafunc.config.getoption("--db-url"),
-            env_value=os.getenv("YOUR_ORM_TEST_DBS", ""),
-            default_urls=[_default_sqlite_url("your-orm-sync-")],
+            cli_value=metafunc.config.getoption("--db-url"),
         )
         metafunc.parametrize("db_target", targets, scope="session")
 
@@ -139,8 +140,8 @@ def cli_schema(tmp_path_factory, db_target):
     _write(
         project_root / "pyproject.toml",
         """
-        [tool.your-orm]
-        your_orm_dir = "appdb"
+        [tool.duo-orm]
+        duo_orm_dir = "appdb"
         """,
     )
 
@@ -148,7 +149,7 @@ def cli_schema(tmp_path_factory, db_target):
     _write(
         app_dir / "database.py",
         f'''
-        from your_orm import Database
+        from duo_orm import Database
         db = Database("{db_target.url}")
         from . import models  # populate metadata
         ''',
@@ -159,24 +160,27 @@ def cli_schema(tmp_path_factory, db_target):
         app_dir / "models.py",
         """
         from datetime import datetime, timezone
-        from your_orm import Mapped, mapped_column, relationship
-        from sqlalchemy import DateTime, ForeignKey
+        from duo_orm import Mapped, mapped_column, relationship
+        from sqlalchemy import DateTime, ForeignKey, String, Integer, Identity
         from .database import db
 
+        USER_TABLE = "duo_users"
+        POST_TABLE = "duo_posts"
+
         class User(db.Model):
-            __tablename__ = "users"
-            id: Mapped[int] = mapped_column(primary_key=True)
-            name: Mapped[str] = mapped_column(nullable=False)
+            __tablename__ = USER_TABLE
+            id: Mapped[int] = mapped_column(Integer, Identity(), primary_key=True)
+            name: Mapped[str] = mapped_column(String(255), nullable=False)
             age: Mapped[int] = mapped_column(nullable=False)
             created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), info={"set_on": "create"}, nullable=True)
             updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), info={"set_on": {"create", "update"}}, nullable=True)
             posts = relationship("Post", back_populates="author", cascade="all, delete-orphan")
 
         class Post(db.Model):
-            __tablename__ = "posts"
-            id: Mapped[int] = mapped_column(primary_key=True)
-            title: Mapped[str] = mapped_column(nullable=False)
-            author_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+            __tablename__ = POST_TABLE
+            id: Mapped[int] = mapped_column(Integer, Identity(), primary_key=True)
+            title: Mapped[str] = mapped_column(String(255), nullable=False)
+            author_id: Mapped[int] = mapped_column(ForeignKey(f"{USER_TABLE}.id"), nullable=False)
             author = relationship("User", back_populates="posts")
         """,
     )
@@ -194,13 +198,13 @@ def cli_schema(tmp_path_factory, db_target):
         )
 
     # 4) Scaffold and migrate
-    _run_cmd(["python", "-m", "your_orm.migrations.cli", "init", "--dir", "appdb"])
-    _run_cmd(["python", "-m", "your_orm.migrations.cli", "migration", "create", "test schema", "--dir", "appdb"])
-    _run_cmd(["python", "-m", "your_orm.migrations.cli", "migration", "upgrade", "--dir", "appdb"])
+    _run_cmd(["python", "-m", "duo_orm.migrations.cli", "init", "--dir", "appdb"])
+    _run_cmd(["python", "-m", "duo_orm.migrations.cli", "migration", "create", "test schema", "--dir", "appdb"])
+    _run_cmd(["python", "-m", "duo_orm.migrations.cli", "migration", "upgrade", "--dir", "appdb"])
 
     def _teardown():
         subprocess.run(
-            ["python", "-m", "your_orm.migrations.cli", "migration", "downgrade", "base", "--dir", "appdb"],
+            ["python", "-m", "duo_orm.migrations.cli", "migration", "downgrade", "base", "--dir", "appdb"],
             cwd=project_root,
             env=env,
             check=False,
@@ -215,23 +219,16 @@ def db(db_target, cli_schema):
     """Sync Database instance for tests."""
     if db_target.is_async:
         pytest.skip("Sync tests expect a synchronous driver URL.")
-    database = Database(db_target.url)
-    with database.sync_engine.begin() as conn:
-        conn.execute(text("DELETE FROM posts"))
-        conn.execute(text("DELETE FROM users"))
-    return database
+    return Database(db_target.url)
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def async_db(db_target, cli_schema):
     """Async Database instance for tests."""
     try:
         database = Database(db_target.url, derive_async=True)
     except ValueError as exc:
         pytest.skip(f"Async not available for this URL: {exc}")
-    async with database.async_engine.begin() as conn:
-        await conn.execute(text("DELETE FROM posts"))
-        await conn.execute(text("DELETE FROM users"))
     return database
 
 

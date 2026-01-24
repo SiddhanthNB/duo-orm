@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 
-from your_orm.session import is_async_context
+from duo_orm.session import is_async_context
 
 
 def test_is_async_context_sync_returns_false():

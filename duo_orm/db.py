@@ -1,4 +1,4 @@
-# your_orm/db.py
+# duo_orm/db.py
 
 from contextlib import contextmanager, asynccontextmanager
 
@@ -71,11 +71,11 @@ def _resolve_urls(sync_url: str, async_url: str | None, derive_async: bool) -> t
         parsed_async, dialect_async = _normalize_dialect(async_url)
         if dialect_async != dialect:
             raise ValueError("async_url dialect must match the primary url dialect.")
-        resolved_async = str(parsed_async.set(drivername=drivers["async"]))
+        resolved_async = parsed_async.set(drivername=drivers["async"]).render_as_string(hide_password=False)
     elif derive_async:
-        resolved_async = str(parsed_sync.set(drivername=drivers["async"]))
+        resolved_async = parsed_sync.set(drivername=drivers["async"]).render_as_string(hide_password=False)
 
-    return str(resolved_sync), resolved_async
+    return resolved_sync.render_as_string(hide_password=False), resolved_async
 
 
 class Database:
@@ -106,6 +106,7 @@ class Database:
         # 2. Manufacture the final, user-facing Model class by combining
         #    SQLAlchemy's base with our custom Active Record methods.
         class Model(Base, _YourOrmMethods):
+            __abstract__ = True  # make the factory base unmapped; user models define tables
             # This is the magic link that solves the flaw!
             # We inject a reference to this specific `db` instance
             # directly into the Model class itself.
@@ -140,7 +141,17 @@ class Database:
         if not self._sync_url:
             raise RuntimeError("Sync engine is not configured for this Database.")
         if self._sync_engine is None:
-            self._sync_engine = create_engine(self._sync_url)
+            try:
+                self._sync_engine = create_engine(self._sync_url)
+            except TypeError as exc:
+                query_keys = make_url(self._sync_url).query.keys()
+                hint = ""
+                if query_keys:
+                    hint = (
+                        f" URL includes query parameters {sorted(query_keys)}; "
+                        "verify they are supported by the chosen driver."
+                    )
+                raise TypeError(f"Failed to create sync engine: {exc}.{hint}") from exc
         return self._sync_engine
 
     @property
@@ -148,7 +159,17 @@ class Database:
         if not self._async_url:
             raise RuntimeError("Async engine is not configured for this Database.")
         if self._async_engine is None:
-            self._async_engine = create_async_engine(self._async_url)
+            try:
+                self._async_engine = create_async_engine(self._async_url)
+            except TypeError as exc:
+                query_keys = make_url(self._async_url).query.keys()
+                hint = ""
+                if query_keys:
+                    hint = (
+                        f" URL includes query parameters {sorted(query_keys)}; "
+                        "verify they are supported by the chosen driver."
+                    )
+                raise TypeError(f"Failed to create async engine: {exc}.{hint}") from exc
         return self._async_engine
 
     @property

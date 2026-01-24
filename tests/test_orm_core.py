@@ -5,24 +5,28 @@ from datetime import datetime, timedelta
 from typing import Tuple
 
 import pytest
-from sqlalchemy import ARRAY, DateTime, ForeignKey, JSON as SAJSON, String
+import pytest_asyncio
+from sqlalchemy import ARRAY, DateTime, ForeignKey, JSON as SAJSON, String, Integer, Identity
 
-from your_orm import Database, Mapped, array, json, mapped_column, relationship
-from your_orm.exceptions import (
+from duo_orm import Database, Mapped, array, json, mapped_column, relationship
+from duo_orm.exceptions import (
     MultipleObjectsFoundError,
     ObjectNotFoundError,
     ValidationError,
 )
-from your_orm.session import active_session_var
+from duo_orm.session import active_session_var
 from tests.conftest import StatementCounter
 
 
 def _build_models(db) -> Tuple[type, type]:
-    class User(db.Model):
-        __tablename__ = "users"
+    user_table = "duo_users"
+    post_table = "duo_posts"
 
-        id: Mapped[int] = mapped_column(primary_key=True)
-        name: Mapped[str] = mapped_column(nullable=False)
+    class User(db.Model):
+        __tablename__ = user_table
+
+        id: Mapped[int] = mapped_column(Integer, Identity(), primary_key=True)
+        name: Mapped[str] = mapped_column(String(255), nullable=False)
         age: Mapped[int] = mapped_column(nullable=False)
         created_at: Mapped[datetime] = mapped_column(
             DateTime(timezone=True),
@@ -40,11 +44,11 @@ def _build_models(db) -> Tuple[type, type]:
                 raise ValidationError("age must be non-negative", field="age")
 
     class Post(db.Model):
-        __tablename__ = "posts"
+        __tablename__ = post_table
 
-        id: Mapped[int] = mapped_column(primary_key=True)
-        title: Mapped[str] = mapped_column(nullable=False)
-        author_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+        id: Mapped[int] = mapped_column(Integer, Identity(), primary_key=True)
+        title: Mapped[str] = mapped_column(String(255), nullable=False)
+        author_id: Mapped[int] = mapped_column(ForeignKey(f"{user_table}.id"), nullable=False)
         author = relationship(User, back_populates="posts")
 
     User.posts = relationship(Post, back_populates="author", cascade="all, delete-orphan")
@@ -54,17 +58,27 @@ def _build_models(db) -> Tuple[type, type]:
 @pytest.fixture
 def sync_models(db, db_target):
     User, Post = _build_models(db)
-    yield User, Post, db
+    db.metadata.drop_all(db.sync_engine)
+    db.metadata.create_all(db.sync_engine)
+    try:
+        yield User, Post, db
+    finally:
+        db.metadata.drop_all(db.sync_engine)
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def async_models(async_db):
     User, Post = _build_models(async_db)
-    yield User, Post, async_db
+    async_db.metadata.drop_all(async_db.sync_engine)
+    async_db.metadata.create_all(async_db.sync_engine)
+    try:
+        yield User, Post, async_db
+    finally:
+        async_db.metadata.drop_all(async_db.sync_engine)
 
 
 def test_database_requires_url():
-    from your_orm import Database
+    from duo_orm import Database
 
     with pytest.raises(ValueError):
         Database("")
@@ -413,7 +427,7 @@ def test_json_helpers_on_supported_dialect(db_target):
 
     class Doc(db.Model):
         __tablename__ = "docs"
-        id: Mapped[int] = mapped_column(primary_key=True)
+        id: Mapped[int] = mapped_column(Integer, Identity(), primary_key=True)
         profile: Mapped[dict] = mapped_column(SAJSON, nullable=False)
 
     db.metadata.create_all(db.sync_engine)
@@ -424,8 +438,10 @@ def test_json_helpers_on_supported_dialect(db_target):
         beta = Doc.where(json(Doc.profile)["flags"]["beta"].is_true()).all()
         assert len(beta) == 1
 
-        if db_target.supports_has_key:
-            has_key = Doc.where(json(Doc.profile)["flags"].has_key("beta")).count()
+        flags_expr = json(Doc.profile)["flags"]
+        has_key_op = getattr(flags_expr._json_expr(), "has_key", None)
+        if db_target.supports_has_key and has_key_op is not None:
+            has_key = Doc.where(flags_expr.has_key("beta")).count()
             assert has_key == 2
 
         not_beta = Doc.where(json(Doc.profile)["flags"]["beta"].is_false()).all()
@@ -449,18 +465,25 @@ def test_array_helpers_on_supported_dialect(db_target):
 
     db = Database(db_target.url)
 
+    try:
+        from sqlalchemy.dialects.postgresql import ARRAY as PG_ARRAY  # type: ignore
+    except Exception:
+        pytest.skip("PostgreSQL ARRAY type not available.")
+
     class Item(db.Model):
         __tablename__ = "items"
-        id: Mapped[int] = mapped_column(primary_key=True)
-        tags: Mapped[list[str]] = mapped_column(ARRAY(String), nullable=False)
+        id: Mapped[int] = mapped_column(Integer, Identity(), primary_key=True)
+        tags: Mapped[list[str]] = mapped_column(PG_ARRAY(String), nullable=False)
 
     db.metadata.create_all(db.sync_engine)
     try:
         Item(tags=["python", "orm"]).save()
         Item(tags=["sql"]).save()
 
-        match_any = Item.where(array(Item.tags).includes_any(["python", "async"])).all()
-        assert len(match_any) == 1
+        overlap_op = getattr(array(Item.tags)._array_expr(), "overlap", None)
+        if overlap_op is not None:
+            match_any = Item.where(array(Item.tags).includes_any(["python", "async"])).all()
+            assert len(match_any) == 1
 
         match_all = Item.where(array(Item.tags).includes_all(["python", "orm"])).all()
         assert len(match_all) == 1

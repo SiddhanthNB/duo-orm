@@ -19,6 +19,10 @@ __pycache__/
 .DS_Store
 *.log
 
+*.sqlite
+*.sh
+TODO.md
+
 /.venv/
 
 .env

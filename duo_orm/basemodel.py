@@ -1,4 +1,4 @@
-# your_orm/basemodel.py
+# duo_orm/basemodel.py
 
 from __future__ import annotations
 from datetime import datetime, timezone
@@ -58,6 +58,16 @@ class _YourOrmMethods:
         return cls._get_query_builder().related(relationship_attr, **kwargs)
 
     @classmethod
+    def order_by(cls: T, *args, **kwargs) -> "QueryBuilder[T]":
+        """Starts a query with ordering applied."""
+        return cls._get_query_builder().order_by(*args, **kwargs)
+
+    @classmethod
+    def paginate(cls: T, *args, **kwargs) -> "QueryBuilder[T]":
+        """Starts a query with pagination applied."""
+        return cls._get_query_builder().paginate(*args, **kwargs)
+
+    @classmethod
     def bulk_create(cls: T, instances: list[T]):
         """Performs a bulk insert of multiple model instances."""
         for instance in instances:
@@ -73,7 +83,7 @@ class _YourOrmMethods:
         """
         self.validate()
         state = sa_inspect(self)
-        is_insert = not state.persistent
+        is_insert = state.transient or state.pending
         self._apply_timestamp_hooks(is_insert=is_insert)
         return _save(self)
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from your_orm import Database, Mapped, mapped_column
+from duo_orm import Database, Mapped, mapped_column
 
 
 def test_database_model_isolation():

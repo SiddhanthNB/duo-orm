@@ -1,7 +1,7 @@
-# your_orm/exceptions.py
+# duo_orm/exceptions.py
 
 """
-This module contains the set of custom exceptions raised by your-orm.
+This module contains the set of custom exceptions raised by DuoORM.
 
 Having custom exceptions allows users of the library to reliably catch
 errors specific to the ORM's operation, rather than generic Python errors.
@@ -9,7 +9,7 @@ errors specific to the ORM's operation, rather than generic Python errors.
 
 
 class YourOrmError(Exception):
-    """Base exception for all errors raised by your-orm."""
+    """Base exception for all errors raised by DuoORM."""
     pass
 
 

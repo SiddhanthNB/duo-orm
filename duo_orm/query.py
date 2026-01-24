@@ -1,4 +1,4 @@
-# your_orm/query.py
+# duo_orm/query.py
 
 from __future__ import annotations
 from dataclasses import dataclass, replace
@@ -106,13 +106,21 @@ class JSONExpression:
     def equals(self, value: Any) -> ClauseElement:
         if value is None:
             return self.is_null()
-        left = self._json_expr() if isinstance(value, (dict, list)) else self._scalar_expr()
+        left = (
+            self._json_expr()
+            if isinstance(value, (dict, list))
+            else _cast_scalar_expr(self, value)
+        )
         return left == value
 
     def not_equals(self, value: Any) -> ClauseElement:
         if value is None:
             return self.is_not_null()
-        left = self._json_expr() if isinstance(value, (dict, list)) else self._scalar_expr()
+        left = (
+            self._json_expr()
+            if isinstance(value, (dict, list))
+            else _cast_scalar_expr(self, value)
+        )
         return left != value
 
     def is_null(self) -> ClauseElement:
@@ -183,6 +191,17 @@ def json(column: InstrumentedAttribute) -> JSONExpression:
     return JSONExpression(column)
 
 
+def _cast_scalar_expr(expr: JSONExpression, value: Any) -> ClauseElement:
+    """Choose an appropriate cast for scalar comparisons based on the Python value."""
+    if isinstance(value, bool):
+        return expr.as_boolean()._scalar_expr()
+    if isinstance(value, int):
+        return expr.as_integer()._scalar_expr()
+    if isinstance(value, float):
+        return expr.as_float()._scalar_expr()
+    return expr._scalar_expr()
+
+
 @dataclass(frozen=True)
 class ArrayExpression:
     column: InstrumentedAttribute
@@ -202,6 +221,9 @@ class ArrayExpression:
 
     def includes_all(self, values: Iterable[Any]) -> ClauseElement:
         prepared = self._prepare_values(values)
+        comparator_contains = getattr(self._array_expr().comparator, "contains", None)
+        if comparator_contains:
+            return comparator_contains(prepared)
         return self._array_expr().contains(prepared)
 
     def includes_any(self, values: Iterable[Any]) -> ClauseElement:

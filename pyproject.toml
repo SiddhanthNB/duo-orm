@@ -7,7 +7,7 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "your-orm"
+name = "duo-orm"
 version = "0.1.0"
 authors = [
   { name="Your Name", email="you@example.com" },
@@ -35,31 +35,31 @@ dependencies = [
 ]
 
 [project.urls]
-"Homepage" = "https://github.com/example/your-orm"
-"Bug Tracker" = "https://github.com/example/your-orm/issues"
+"Homepage" = "https://github.com/example/duo-orm"
+"Bug Tracker" = "https://github.com/example/duo-orm/issues"
 
-# This section creates the `your-orm` command-line tool.
+# This section creates the `duo-orm` command-line tool.
 # It points to the main `cli` group function inside our cli.py file.
 [project.scripts]
-your-orm = "your_orm.migrations.cli:cli"
+duo-orm = "duo_orm.migrations.cli:cli"
 
 [project.optional-dependencies]
 all = [
     "psycopg[binary]>=3.1", # PostgreSQL (sync and async)
-    "python-oracledb>=1.4", # Oracle (sync and async)
-    "pymysql>=1.0", # MySQL (sync)
+    "oracledb>=2.0", # Oracle (sync and async)
+    "pymysql>=1.1", # MySQL (sync)
     "asyncmy>=0.2", # MySQL (async)
-    "pyodbc>=4.0", # MSSQL (sync)
-    "aioodbc>=0.3", # MSSQL (async)
-    "aiosqlite>=0.17", # SQLite (async)
+    "pyodbc>=5.0", # MSSQL (sync)
+    "aioodbc>=0.5", # MSSQL (async)
+    "aiosqlite>=0.20", # SQLite (async)
 ]
 postgresql = ["psycopg[binary]>=3.1"]
-oracle = ["python-oracledb>=1.4"]
-mysql = ["pymysql>=1.0", "asyncmy>=0.2"]
-mssql = ["pyodbc>=4.0", "aioodbc>=0.3"]
-sqlite = ["aiosqlite>=0.17"]
+oracle = ["oracledb>=2.0"]
+mysql = ["pymysql>=1.1", "asyncmy>=0.2"]
+mssql = ["pyodbc>=5.0", "aioodbc>=0.5"]
+sqlite = ["aiosqlite>=0.20"]
 
-# Dependencies only needed for developing and testing 'your-orm' itself.
+# Dependencies only needed for developing and testing 'duo-orm' itself.
 # Example: pip install -e .[dev]
 dev = [
     "pytest>=7.0",

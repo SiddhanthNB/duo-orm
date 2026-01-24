@@ -3,14 +3,14 @@ from __future__ import annotations
 import pytest
 from sqlalchemy import String, select
 
-from your_orm import Database, Mapped, mapped_column
+from duo_orm import Database, Mapped, mapped_column
 
 
 def _model(db):
     class User(db.Model):
         __tablename__ = "users_patch"
         id: Mapped[int] = mapped_column(primary_key=True)
-        name: Mapped[str] = mapped_column(String, nullable=False)
+        name: Mapped[str] = mapped_column(String(255), nullable=False)
         age: Mapped[int] = mapped_column(nullable=False)
 
     return User
