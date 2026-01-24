@@ -24,6 +24,7 @@ if config.config_file_name is not None:
 # This automatically links the migration tool to your application's models.
 target_metadata = your_orm_db.metadata
 db_url = your_orm_db.url
+version_table = config.get_main_option("version_table", "{version_table}")
 
 # Set the database URL from our central db object.
 config.set_main_option("sqlalchemy.url", str(db_url))
@@ -46,6 +47,7 @@ def run_migrations_offline() -> None:
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
+        version_table=version_table,
     )
 
     with context.begin_transaction():
@@ -54,7 +56,11 @@ def run_migrations_offline() -> None:
 
 def do_run_migrations(connection):
     """The synchronous callback that Alembic will run."""
-    context.configure(connection=connection, target_metadata=target_metadata)
+    context.configure(
+        connection=connection,
+        target_metadata=target_metadata,
+        version_table=version_table,
+    )
     with context.begin_transaction():
         context.run_migrations()
 

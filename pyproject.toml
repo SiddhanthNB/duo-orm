@@ -31,6 +31,7 @@ dependencies = [
     "alembic>=1.8",
     "click>=8.0",
     "toml>=0.10",
+    "aiosqlite>=0.17",
 ]
 
 [project.urls]
@@ -43,10 +44,19 @@ dependencies = [
 your-orm = "your_orm.migrations.cli:cli"
 
 [project.optional-dependencies]
-# Database-specific drivers. Users will install the one they need.
-# Example: pip install your-orm[postgres]
-postgres = ["psycopg[binary, pool]>=3.1"]
-mysql = ["asyncmy>=0.2"]
+all = [
+    "psycopg[binary]>=3.1", # PostgreSQL (sync and async)
+    "python-oracledb>=1.4", # Oracle (sync and async)
+    "pymysql>=1.0", # MySQL (sync)
+    "asyncmy>=0.2", # MySQL (async)
+    "pyodbc>=4.0", # MSSQL (sync)
+    "aioodbc>=0.3", # MSSQL (async)
+    "aiosqlite>=0.17", # SQLite (async)
+]
+postgresql = ["psycopg[binary]>=3.1"]
+oracle = ["python-oracledb>=1.4"]
+mysql = ["pymysql>=1.0", "asyncmy>=0.2"]
+mssql = ["pyodbc>=4.0", "aioodbc>=0.3"]
 sqlite = ["aiosqlite>=0.17"]
 
 # Dependencies only needed for developing and testing 'your-orm' itself.

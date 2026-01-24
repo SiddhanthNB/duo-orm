@@ -51,7 +51,7 @@ def init(orm_dir):
 
         # A. Scaffold migrations environment
         if not migrations_dir.exists():
-            _generate_files(base_dir, module_path, DB_OBJECT_NAME)
+            _generate_files(base_dir, module_path, DB_OBJECT_NAME, config["version_table"])
             click.secho(f"✅ Created migration environment at: {migrations_dir}", fg="green")
         else:
             click.secho(f"Migration environment at {migrations_dir} already exists. Skipping.", fg="yellow")
@@ -71,7 +71,7 @@ def init(orm_dir):
         click.secho(f"✅ Ensured models directory exists at: {models_dir}", fg="green")
 
         # Persist the resolved directory so future commands can infer it without flags.
-        _persist_pyproject_config(project_root, relative_dir)
+        _persist_pyproject_config(project_root, relative_dir, config.get("version_table"))
 
         click.secho("\nProject initialization complete!", fg="green")
         click.echo("Next steps:")

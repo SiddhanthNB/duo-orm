@@ -29,11 +29,33 @@ Inside the block your code automatically shares a single session. The block comm
 
 ### 1. Installation
 
+Drivers are managed automatically. Supply only base dialect URLs (e.g., `postgresql://...`, `mysql://...`, `sqlite:///file.db`) — do **not** include `+driver`; we inject the correct sync/async driver for you.
+
 ```bash
+# Default: install with SQLite support (stdlib sqlite3 + aiosqlite)
 pip install your-orm
-# Install the required database driver
-pip install your-orm[postgres]
+
+# Optional: install only the drivers you need
+pip install your-orm[postgresql]           # psycopg (sync+async)
+pip install your-orm[mysql]                # pymysql (sync) + asyncmy (async)
+pip install your-orm[mssql]                # pyodbc (sync) + aioodbc (async)
+pip install your-orm[oracle]               # python-oracledb (sync+async)
+pip install your-orm[all]                  # explicitly install everything
 ```
+Need a stdlib SQLite fallback? See the SQLite note below:
+
+> SQLite fallback (only if your Python lacks stdlib sqlite3, e.g., minimal Docker/Lambda):
+> ```bash
+> pip install pysqlite3-binary
+> ```
+> Then alias it once at startup:
+> ```python
+> import sys, pysqlite3
+> sys.modules["sqlite3"] = pysqlite3
+> ```
+> This makes `import sqlite3` use the binary fallback.
+
+Async derivation uses the async driver for your dialect (psycopg for Postgres, asyncmy for MySQL, aioodbc for MSSQL, aiosqlite for SQLite). If the async driver isn’t installed, async calls will fail—install the matching extra above or `your-orm[all]`.
 
 ### 2. Initialization
 
@@ -115,7 +137,7 @@ async def main():
     # Simple reads with Pythonic operators
     users = await User.where(User.age > 25).all()
     alice = await User.where(User.name == "Alice").first()
-    
+
     # More complex queries
     users = await User.where(
         (User.age > 30) & User.name.startswith('A')

@@ -2,6 +2,7 @@
 
 import importlib
 import importlib.resources
+import re
 from pathlib import Path
 from typing import Any, Dict, Tuple, Optional
 
@@ -9,9 +10,11 @@ import toml
 from alembic.config import Config
 
 from your_orm.exceptions import ConfigurationError
+from your_orm.db import Database
 
 DEFAULT_ORM_DIR = "db"
 DB_OBJECT_NAME = "db"
+DEFAULT_VERSION_TABLE = "alembic_version"
 
 
 def _get_project_root() -> Path:
@@ -39,6 +42,24 @@ def _normalize_dir(value: str | None) -> str:
                 f"Invalid path segment '{part}' in your_orm_dir. Use valid Python identifiers."
             )
     return "/".join(parts)
+
+
+def _slugify_repo_name(path: Path) -> str:
+    """Convert a repository directory name to a snake_case-ish slug."""
+    name = path.name
+    slug = re.sub(r"[^0-9A-Za-z]+", "_", name).strip("_").lower()
+    return slug or "your_orm"
+
+
+def _normalize_version_table(value: Optional[str], project_root: Path) -> str:
+    raw = (value or "").strip()
+    if not raw:
+        return DEFAULT_VERSION_TABLE
+    if not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", raw):
+        raise ConfigurationError(
+            "version_table must be a valid SQL identifier (letters, digits, underscore, not starting with a digit)."
+        )
+    return raw
 
 
 def _resolve_layout(project_root: Path, relative_dir: str) -> Tuple[Path, Path, str]:
@@ -70,16 +91,20 @@ def _get_config(found_root: Optional[Path] = None, override_dir: Optional[str] =
         raw_dir = orm_config.get("your_orm_dir")
     normalized_dir = _normalize_dir(raw_dir)
     orm_config["your_orm_dir"] = normalized_dir
+    orm_config["version_table"] = _normalize_version_table(orm_config.get("version_table"), root)
     return root, orm_config
 
 
-def _persist_pyproject_config(project_root: Path, relative_dir: str):
+def _persist_pyproject_config(project_root: Path, relative_dir: str, version_table: Optional[str] = None):
     pyproject_path = project_root / "pyproject.toml"
     data: Dict[str, Any] = {}
     if pyproject_path.exists():
         data = toml.load(pyproject_path)
     tool_section = data.setdefault("tool", {})
-    tool_section["your-orm"] = {"your_orm_dir": relative_dir}
+    orm_section = tool_section.setdefault("your-orm", {})
+    orm_section["your_orm_dir"] = relative_dir
+    if version_table:
+        orm_section["version_table"] = version_table
     pyproject_path.write_text(toml.dumps(data))
 
 
@@ -88,7 +113,7 @@ def load_template(filename: str) -> str:
     return template_path.read_text()
 
 
-def _generate_files(base_dir: Path, module_path: str, db_object_name: str):
+def _generate_files(base_dir: Path, module_path: str, db_object_name: str, version_table: str):
     """Creates the directories and files for the migration environment."""
     migrations_dir = base_dir / "migrations"
     versions_dir = migrations_dir / "versions"
@@ -108,6 +133,7 @@ def _generate_files(base_dir: Path, module_path: str, db_object_name: str):
     env_py_content = env_template.format(
         db_object_module=f"{module_path}.database",
         db_object_name=db_object_name,
+        version_table=version_table,
     )
     (migrations_dir / "env.py").write_text(env_py_content)
 
@@ -147,8 +173,14 @@ def get_alembic_config(override_dir: Optional[str] = None) -> Config:
             f"Could not import Database instance from '{module_path}.database'."
         ) from exc
 
+    if not isinstance(db_object, Database):
+        raise ConfigurationError(
+            f"The object '{DB_OBJECT_NAME}' in '{module_path}.database' is not a your_orm.Database instance."
+        )
+
     # Programmatically set the URL and metadata for Alembic's environment
     config.set_main_option("sqlalchemy.url", str(db_object.url))
+    config.set_main_option("version_table", user_config["version_table"])
     config.attributes["target_metadata"] = db_object.metadata
 
     return config
