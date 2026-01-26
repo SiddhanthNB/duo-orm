@@ -67,6 +67,9 @@ dev = [
     "pytest-cov>=4.1",
     "ruff>=0.1",
     "black>=23.0",
+    "mkdocs>=1.5",
+    "mkdocs-material>=9.0",
+    "mkdocstrings-python>=1.0",
 ]
 
 # --- Tool Configuration ---

@@ -1,0 +1,96 @@
+# mkdocs.yml
+
+# Project Information
+site_name: Duo ORM
+site_url: https://SiddhanthNB.github.io/duo-orm/
+site_description: >-
+  An opinionated, modern ORM for Python combining the power of SQLAlchemy 2.0
+  with a clean, symmetrical API for sync and async operations.
+repo_url: https://github.com/SiddhanthNB/duo-orm
+repo_name: SiddhanthNB/duo-orm
+edit_uri: "edit/main/docs/"
+
+# Tell mkdocs to use our hook to find the source code
+hooks:
+  - hooks.py
+
+# Theme Configuration (Material for MkDocs)
+theme:
+  name: material
+  logo: assets/logo.svg
+  favicon: assets/logo.svg
+  palette:
+    # Light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    # Dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+    - content.code.annotate
+    - content.tabs.link
+
+# Markdown Extensions
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - toc:
+      permalink: true
+
+# Plugins
+plugins:
+  - search
+  - mkdocstrings:
+      default_handler: python
+      handlers:
+        python:
+          options:
+            docstring_style: google
+            show_root_heading: true
+            show_source: true
+            merge_init_into_class: true
+            separate_signature: true
+
+# Site Navigation
+nav:
+  - 'Get Started': 'index.md'
+  - 'Quickstart': 'quickstart.md'
+  - 'User Guides':
+    - 'guides/defining-models.md'
+    - 'guides/querying-data.md'
+    - 'guides/sessions-and-transactions.md'
+    - 'guides/database-migrations.md'
+    - 'guides/json-and-array-types.md'
+  - 'API Reference':
+    - 'reference/database.md'
+    - 'reference/model.md'
+    - 'reference/query.md'
+    - 'reference/exceptions.md'
+  - 'About':
+    - 'about/license.md'
+    - 'about/contributing.md'
