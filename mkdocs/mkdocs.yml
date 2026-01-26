@@ -1,7 +1,7 @@
 # mkdocs.yml
 
 # Project Information
-site_name: Duo ORM
+site_name: DuoORM
 site_url: https://SiddhanthNB.github.io/duo-orm/
 site_description: >-
   An opinionated, modern ORM for Python combining the power of SQLAlchemy 2.0
@@ -9,6 +9,10 @@ site_description: >-
 repo_url: https://github.com/SiddhanthNB/duo-orm
 repo_name: SiddhanthNB/duo-orm
 edit_uri: "edit/main/docs/"
+
+# Paths
+docs_dir: ../docs
+site_dir: ../site
 
 # Tell mkdocs to use our hook to find the source code
 hooks:

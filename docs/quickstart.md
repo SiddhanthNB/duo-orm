@@ -35,6 +35,19 @@ Result:
 └── pyproject.toml
 ```
 
+Need a different location? Run:
+
+```bash
+duo-orm init --dir path/to/db
+```
+
+This creates or updates `pyproject.toml` so future migration commands find your db stack:
+
+```toml title="pyproject.toml"
+[tool.duo-orm]
+duo_orm_dir = "path/to/db"
+```
+
 ### Configure the database
 
 Edit `db/database.py` to set your connection.

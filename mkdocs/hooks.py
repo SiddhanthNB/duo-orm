@@ -14,7 +14,7 @@ from typing import Any, Mapping
 
 def on_config(config: Mapping[str, Any]) -> Mapping[str, Any]:
     """Add the repository root to sys.path for mkdocstrings imports."""
-    repo_root = Path(__file__).parent.resolve()
+    repo_root = Path(__file__).resolve().parent.parent
     if str(repo_root) not in sys.path:
         sys.path.insert(0, str(repo_root))
     return config

@@ -1,4 +1,4 @@
-# Get Started with Duo ORM
+# Get Started with DuoORM
 
 <div class="grid cards" markdown>
 - :material-database-search:{ .lg .middle } **Symmetrical API**
@@ -11,15 +11,15 @@
     ---
     Default is single-statement, standalone calls. Use transactions when you need related graphs or cascades.
 
-- :material-rocket-launch:{ .lg .middle } **SQLAlchemy + Alembic, built in**
+- :material-rocket-launch:{ .lg .middle } **SQLAlchemy & Alembic ready**
 
     ---
-    SQLAlchemy Core foundation with Alembic scaffolding included, so migrations and ORM stay in one place alongside explicit unit-of-work modes, driver management, ergonomic helpers, and a ready-to-go CLI.
+    SQLAlchemy Core base with Alembic scaffolding included, keeping queries and migrations together.
 </div>
 
-Duo ORM is an opinionated yet straightforward ORM: you control when stateful work happens, you get symmetrical sync/async APIs, and you don’t manage drivers. Provide **driverless URLs** and the ORM injects the right sync/async drivers for you.
+DuoORM is an opinionated yet straightforward ORM: you control when stateful work happens, you get symmetrical sync/async APIs, and you don’t manage drivers. Provide driverless URLs and the ORM injects the right sync/async drivers for you.
 
-## Why Duo ORM (quickly)
+## Why DuoORM
 
 - Powered by SQLAlchemy Core with Alembic migrations scaffolded for you, so you avoid glue code.
 - Symmetrical sync/async APIs and CLI tooling so you can ship fast in services, scripts, or workers.
@@ -30,7 +30,8 @@ Duo ORM is an opinionated yet straightforward ORM: you control when stateful wor
 
 ```bash
 pip install duo-orm  # core + SQLite
-# Or pick your drivers
+
+# Or pick your dialect
 pip install "duo-orm[postgresql]"
 pip install "duo-orm[mysql]"
 pip install "duo-orm[mssql]"
@@ -38,7 +39,7 @@ pip install "duo-orm[oracle]"
 pip install "duo-orm[all]"
 ```
 
-## Hello Duo ORM
+## Hello DuoORM
 
 ### Standalone (default)
 
@@ -47,7 +48,7 @@ Each call is a single statement with its own short-lived session. This is great 
 ```python
 from duo_orm import Database, Mapped, mapped_column
 
-db = Database("sqlite:///./app.db")  # driverless URL; drivers managed for you
+db = Database("sqlite:///./app.db")  # driverless URL
 
 class User(db.Model):
     __tablename__ = "users"
@@ -57,6 +58,9 @@ class User(db.Model):
 # One-shot read (single statement/session)
 user = User.where(User.name == "Ada").first()
 ```
+
+!!! tip "Use driverless URLs"
+    Provide only the base dialect in your URL (for example `postgresql://user:pass@host/db`, `sqlite:///./app.db`). Do not include driver suffixes like `+psycopg`; DuoORM injects the correct sync/async drivers for you.
 
 ### When to use transactions
 
@@ -110,5 +114,18 @@ duo-orm init
 - Query data: [User Guides: Querying Data](guides/querying-data.md)
 - Full walkthrough: [Quickstart](quickstart.md)
 
-!!! note "Need a SQLite fallback?"
-    Only if your Python lacks stdlib `sqlite3` (e.g., minimal runtimes). Install `pysqlite3-binary` and alias `sqlite3` once at startup as shown in the README.
+## Troubleshooting / FAQ
+
+!!! note "SQLite fallback (rare)"
+    Only if your Python lacks stdlib `sqlite3` (e.g., minimal runtimes). Install `pysqlite3-binary`, then alias it once at startup:
+    ```python
+    import sys, pysqlite3
+    sys.modules["sqlite3"] = pysqlite3
+    ```
+
+??? info "Which drivers are used?"
+    - PostgreSQL: `psycopg` (sync and async)
+    - MySQL/MariaDB: `pymysql` (sync), `asyncmy` (async)
+    - MSSQL: `pyodbc` (sync), `aioodbc` (async)
+    - Oracle: `oracledb` (sync and async)
+    - SQLite: stdlib `sqlite3` (sync), `aiosqlite` (async)

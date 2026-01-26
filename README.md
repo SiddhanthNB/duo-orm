@@ -18,7 +18,9 @@ An opinionated ORM with symmetrical sync/async APIs, explicit unit-of-work contr
 ## Install
 
 ```bash
-pip install duo-orm                  # core + sqlite drivers
+pip install duo-orm                  # core + sqlite
+
+# Or pick your dialect
 pip install "duo-orm[postgresql]"    # psycopg (sync+async)
 pip install "duo-orm[mysql]"         # pymysql + asyncmy
 pip install "duo-orm[mssql]"         # pyodbc + aioodbc
