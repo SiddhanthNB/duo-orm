@@ -5,6 +5,7 @@ from sqlalchemy import ARRAY, Integer, String, JSON as SAJSON
 
 from duo_orm import Mapped, mapped_column
 from duo_orm.query import QueryBuilder, array, json
+from duo_orm.exceptions import InvalidQueryError
 from tests.test_orm_core import _build_models
 
 
@@ -63,7 +64,7 @@ def test_related_error_paths_and_loader(db):
         qb.related(User.name)  # not a relationship
 
     qb2 = QueryBuilder(User, db=db)
-    with pytest.raises(ValueError):
+    with pytest.raises(InvalidQueryError):
         qb2.related(Post.author)  # wrong parent model
 
     qb3 = QueryBuilder(User, db=db)

@@ -34,7 +34,7 @@ from sqlalchemy import event
 
 # 7. The Custom Exceptions
 from .exceptions import (
-    YourOrmError,
+    DuoOrmError,
     ConfigurationError,
     ObjectNotFoundError,
     MultipleObjectsFoundError,
@@ -69,7 +69,7 @@ __all__ = [
     # Lifecycle Events Kit
     "event",
     # Custom Exceptions
-    "YourOrmError",
+    "DuoOrmError",
     "ConfigurationError",
     "ObjectNotFoundError",
     "MultipleObjectsFoundError",

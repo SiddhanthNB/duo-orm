@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from duo_orm import Database, Mapped, mapped_column
+from duo_orm.exceptions import ConfigurationError
 
 
 def test_database_model_isolation():
@@ -29,7 +30,7 @@ def test_database_derives_async_url_sqlite(tmp_path):
 
 def test_database_rejects_async_url_as_primary(tmp_path):
     path = tmp_path / "d.sqlite"
-    with pytest.raises(ValueError):
+    with pytest.raises(ConfigurationError):
         Database(f"sqlite+aiosqlite:///{path}")
 
 

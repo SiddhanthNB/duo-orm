@@ -36,11 +36,15 @@ from sqlalchemy.types import JSON as SQLAlchemyJSON
 
 try:  # Optional dependency – present on Postgres dialects.
     from sqlalchemy.dialects.postgresql import JSONB, ARRAY as PG_ARRAY
-except Exception:  # pragma: no cover - dialect may not be installed.
+except ImportError:  # pragma: no cover
     JSONB = None  # type: ignore[misc,assignment]
     PG_ARRAY = None  # type: ignore[misc,assignment]
 
 from .executor import _first, _all, _update, _delete, _count, _one, _exists
+from .exceptions import InvalidQueryError
+
+if TYPE_CHECKING:
+    from .db import Database
 
 # This helps with type hinting for the model class itself.
 T = TypeVar("T")
@@ -56,9 +60,7 @@ if PG_ARRAY is not None and PG_ARRAY not in ARRAY_TYPES:
 
 def _is_json_column(attr: InstrumentedAttribute) -> bool:
     column_type = getattr(attr, "type", None)
-    if column_type is None:
-        return False
-    return isinstance(column_type, JSON_TYPES)
+    return isinstance(column_type, JSON_TYPES) if column_type is not None else False
 
 
 def _is_array_column(attr: InstrumentedAttribute) -> bool:
@@ -72,121 +74,139 @@ def _is_array_column(attr: InstrumentedAttribute) -> bool:
 
 @dataclass(frozen=True)
 class JSONExpression:
+    """
+    A helper object for building JSON-aware query expressions.
+
+    Instances of this class are created by the `json()` helper function.
+    It provides a fluent, Pythonic interface for creating SQLAlchemy clauses
+    that operate on `JSON` or `JSONB` columns.
+    """
     column: InstrumentedAttribute
     path: Tuple[Any, ...] = ()
-    cast_as: str | None = None
+    cast_as: Optional[str] = None
 
     def __post_init__(self):
         if not isinstance(self.column, InstrumentedAttribute):
-            raise TypeError("json() expects an InstrumentedAttribute column.")
+            raise TypeError("json() expects a SQLAlchemy model attribute.")
         if not _is_json_column(self.column):
-            raise TypeError("json() can only target JSON-capable columns.")
+            raise TypeError("json() can only be used on JSON-supported column types.")
 
     def __getitem__(self, key: Any) -> "JSONExpression":
+        """Navigates to a nested key or index within the JSON object."""
         if not isinstance(key, (str, int)):
-            raise TypeError("JSON paths only accept string or integer keys.")
+            raise TypeError("JSON path keys must be strings or integers.")
         return replace(self, path=self.path + (key,))
 
-    # --- Casting helpers -------------------------------------------------
-
     def as_text(self) -> "JSONExpression":
+        """Casts the JSON value to text for comparison."""
         return replace(self, cast_as="text")
 
     def as_integer(self) -> "JSONExpression":
+        """Casts the JSON value to an integer for comparison."""
         return replace(self, cast_as="integer")
 
     def as_float(self) -> "JSONExpression":
+        """Casts the JSON value to a float for comparison."""
         return replace(self, cast_as="float")
 
     def as_boolean(self) -> "JSONExpression":
+        """Casts the JSON value to a boolean for comparison."""
         return replace(self, cast_as="boolean")
 
-    # --- Predicates ------------------------------------------------------
-
     def equals(self, value: Any) -> ClauseElement:
+        """Creates an equality comparison clause (`==`)."""
         if value is None:
             return self.is_null()
-        left = (
-            self._json_expr()
-            if isinstance(value, (dict, list))
-            else _cast_scalar_expr(self, value)
-        )
+        left = self._json_expr() if isinstance(value, (dict, list)) else _cast_scalar_expr(self, value)
         return left == value
 
     def not_equals(self, value: Any) -> ClauseElement:
+        """Creates an inequality comparison clause (`!=`)."""
         if value is None:
             return self.is_not_null()
-        left = (
-            self._json_expr()
-            if isinstance(value, (dict, list))
-            else _cast_scalar_expr(self, value)
-        )
+        left = self._json_expr() if isinstance(value, (dict, list)) else _cast_scalar_expr(self, value)
         return left != value
 
     def is_null(self) -> ClauseElement:
+        """Creates a clause to check if the JSON value is null."""
         return self._json_expr().is_(None)
 
     def is_not_null(self) -> ClauseElement:
+        """Creates a clause to check if the JSON value is not null."""
         return self._json_expr().is_not(None)
 
     def is_true(self) -> ClauseElement:
+        """Creates a clause to check if the JSON value is the boolean `true`."""
         return self.as_boolean()._scalar_expr().is_(True)
 
     def is_false(self) -> ClauseElement:
+        """Creates a clause to check if the JSON value is the boolean `false`."""
         return self.as_boolean()._scalar_expr().is_(False)
 
     def contains(self, fragment: Any) -> ClauseElement:
+        """Creates a clause to check if the JSON value contains the given fragment."""
         return self._json_expr().contains(fragment)
 
     def has_key(self, key: Any) -> ClauseElement:
+        """Creates a clause to check if the JSON object has a specific key."""
         expr = self._json_expr()
         if not hasattr(expr, "has_key"):
-            raise TypeError("The current dialect does not expose JSON has_key().")
+            raise TypeError("The current dialect does not expose a JSON `has_key` operator.")
         return expr.has_key(key)  # type: ignore[attr-defined]
 
-    # Convenience to surface raw SQLAlchemy expression when needed.
     def expression(self, *, as_text: bool = False) -> ClauseElement:
-        return self._scalar_expr() if as_text or self.cast_as else self._json_expr()
+        """
+        Returns the raw underlying SQLAlchemy expression.
 
-    # Rich comparisons to keep syntax pythonic.
-    def __eq__(self, other: Any) -> ClauseElement:  # type: ignore[override]
+        Args:
+            as_text: When True, coerce the expression to text even if no cast is set.
+        """
+        if as_text:
+            return self._as_text(self._json_expr())
+        return self._scalar_expr() if self.cast_as else self._json_expr()
+
+    def __eq__(self, other: Any) -> ClauseElement:
         return self.equals(other)
 
-    def __ne__(self, other: Any) -> ClauseElement:  # type: ignore[override]
+    def __ne__(self, other: Any) -> ClauseElement:
         return self.not_equals(other)
 
-    # --- Internals -------------------------------------------------------
-
     def _json_expr(self) -> ColumnOperators:
+        """Builds the SQLAlchemy JSON path expression."""
         expr: ColumnOperators = self.column
         for key in self.path:
             expr = expr[key]  # type: ignore[index]
         return expr
 
     def _scalar_expr(self) -> ClauseElement:
+        """Builds a scalar version of the expression, with optional casting."""
         expr = self._json_expr()
-        match self.cast_as:
-            case "integer":
-                return cast(self._as_text(expr), Integer)
-            case "float":
-                return cast(self._as_text(expr), Float)
-            case "boolean":
-                return cast(self._as_text(expr), Boolean)
-            case "text" | None:
-                return self._as_text(expr)
-            case _:
-                return self._as_text(expr)
+        caster = {
+            "integer": Integer,
+            "float": Float,
+            "boolean": Boolean,
+        }.get(self.cast_as or "")
+        return cast(self._as_text(expr), caster) if caster else self._as_text(expr)
 
-    def _as_text(self, expr: ColumnOperators) -> ClauseElement:
+    @staticmethod
+    def _as_text(expr: ColumnOperators) -> ClauseElement:
+        """Coerces a JSON expression to text for scalar operations."""
         text_expr = getattr(expr, "astext", None)
-        if text_expr is not None:
-            return text_expr
-        return cast(expr, Text)
+        return text_expr if text_expr is not None else cast(expr, Text)
 
 
 def json(column: InstrumentedAttribute) -> JSONExpression:
     """
-    Entry point for building JSON-aware predicates inside QueryBuilder.where.
+    Entry point for building JSON-aware query expressions.
+
+    Wraps a model's JSON column attribute to provide a fluent API for
+    path navigation and comparison operators.
+
+    Args:
+        column: The SQLAlchemy model attribute representing a JSON column.
+
+    Returns:
+        A `JSONExpression` object to build the query clause.
     """
     return JSONExpression(column)
 
@@ -204,74 +224,85 @@ def _cast_scalar_expr(expr: JSONExpression, value: Any) -> ClauseElement:
 
 @dataclass(frozen=True)
 class ArrayExpression:
+    """
+
+    A helper object for building ARRAY-aware query expressions.
+
+    Instances of this class are created by the `array()` helper function.
+    It provides a fluent, Pythonic interface for creating SQLAlchemy clauses
+    that operate on `ARRAY` columns.
+    """
     column: InstrumentedAttribute
 
     def __post_init__(self):
         if not isinstance(self.column, InstrumentedAttribute):
-            raise TypeError("array() expects an InstrumentedAttribute column.")
+            raise TypeError("array() expects a SQLAlchemy model attribute.")
         if not _is_array_column(self.column):
-            raise TypeError("array() can only target ARRAY-capable columns.")
+            raise TypeError("array() can only be used on ARRAY-supported column types.")
 
     def includes(self, value: Any) -> ClauseElement:
+        """Creates a clause to check if the array contains a single value."""
         expr = self._array_expr()
-        contains_member = getattr(expr, "any", None)
-        if contains_member is None:
-            raise TypeError("The current dialect does not support array membership checks.")
-        return contains_member(value)
+        if not hasattr(expr, "any"):
+            raise TypeError("The current dialect does not support array `any()` checks.")
+        return expr.any(value)  # type: ignore[attr-defined]
 
     def includes_all(self, values: Iterable[Any]) -> ClauseElement:
+        """Creates a clause to check if the array contains all of the given values."""
         prepared = self._prepare_values(values)
-        comparator_contains = getattr(self._array_expr().comparator, "contains", None)
-        if comparator_contains:
-            return comparator_contains(prepared)
-        return self._array_expr().contains(prepared)
+        if not prepared:
+            raise ValueError("includes_all() requires at least one value.")
+        comparator = getattr(self._array_expr().comparator, "contains", None)
+        return comparator(prepared) if comparator else self._array_expr().contains(prepared)
 
     def includes_any(self, values: Iterable[Any]) -> ClauseElement:
+        """Creates a clause to check if the array contains any of the given values (overlap)."""
         prepared = self._prepare_values(values)
-        overlap = getattr(self._array_expr(), "overlap", None)
-        if overlap is None:
-            raise TypeError("The current dialect does not support array overlap checks.")
-        return overlap(prepared)
+        if not hasattr(self._array_expr(), "overlap"):
+            raise TypeError("The current dialect does not support array `overlap` checks.")
+        return self._array_expr().overlap(prepared)  # type: ignore[attr-defined]
 
     def equals(self, values: Iterable[Any]) -> ClauseElement:
-        return self._array_expr() == list(values)
+        """Creates a clause to check for exact array equality."""
+        return self._array_expr() == self._prepare_values(values)
 
     def not_equals(self, values: Iterable[Any]) -> ClauseElement:
-        return self._array_expr() != list(values)
+        """Creates a clause to check for array inequality."""
+        return self._array_expr() != self._prepare_values(values)
 
     def length(self) -> ClauseElement:
+        """Returns an expression representing the length of the array."""
         expr = self._array_expr()
-        if hasattr(func, "cardinality"):
-            return func.cardinality(expr)
-        # Fallback: array_length(expr, 1) counts elements in the first dimension.
-        return func.array_length(expr, 1)
+        return func.cardinality(expr) if hasattr(func, "cardinality") else func.array_length(expr, 1)
 
     def expression(self) -> ColumnOperators:
+        """Returns the raw underlying SQLAlchemy expression."""
         return self._array_expr()
 
     def _array_expr(self) -> ColumnOperators:
         return self.column
 
-    def _prepare_values(self, values: Iterable[Any]) -> List[Any]:
+    @staticmethod
+    def _prepare_values(values: Iterable[Any]) -> List[Any]:
         if values is None:
-            raise ValueError("Array helpers require at least one value.")
-        if isinstance(values, (list, tuple)):
-            seq = list(values)
-        else:
-            seq = list(values)
-        if not seq:
-            raise ValueError("Array helpers require at least one value.")
-        return seq
+            raise ValueError("Array helpers require a non-null iterable of values.")
+        return list(values)
 
 
 def array(column: InstrumentedAttribute) -> ArrayExpression:
     """
-    Entry point for building ARRAY-aware predicates inside QueryBuilder.where.
+    Entry point for building ARRAY-aware query expressions.
+
+    Wraps a model's ARRAY column attribute to provide a fluent API for
+    membership and comparison operators.
+
+    Args:
+        column: The SQLAlchemy model attribute representing an ARRAY column.
+
+    Returns:
+        An `ArrayExpression` object to build the query clause.
     """
     return ArrayExpression(column)
-
-if TYPE_CHECKING:
-    from .db import Database
 
 
 class QueryBuilder:
@@ -280,36 +311,29 @@ class QueryBuilder:
 
     This class is the core of the ORM's query-building API. It constructs
     a SQLAlchemy statement internally and provides terminal methods
-    (like .first(), .all()) to execute it.
+    (like `.first()`, `.all()`) to execute it.
+
+    Instances of this class are created by calling class-level methods on a
+    Duo ORM model (e.g., `User.where(...)`).
     """
 
     def __init__(self, model_cls: Type[T], db: "Database"):
-        """
-        Initializes the QueryBuilder.
-
-        Args:
-            model_cls: The user's model class (e.g., User).
-            db: The configured Database instance.
-        """
         if not db:
-            raise RuntimeError(
-                "QueryBuilder cannot be initialized without a Database instance. "
-                "Ensure your BaseModel is correctly associated with your db object."
-            )
+            raise RuntimeError("QueryBuilder must be initialized with a Database instance.")
         self._model_cls = model_cls
         self.db = db
-        # The internal state: a SQLAlchemy Select object.
         self._statement = select(self._model_cls)
         self._related_used = False
 
-    def where(self, *args) -> "QueryBuilder[T]":
+    def where(self, *args: ClauseElement) -> "QueryBuilder[T]":
         """
-        Adds a WHERE clause to the query.
+        Adds one or more WHERE clauses to the query, joined by `AND`.
 
-        Accepts one or more SQLAlchemy expressions.
+        Args:
+            *args: SQLAlchemy column expressions (e.g., `User.age > 18`).
 
-        Example:
-            User.where(User.name == "Alice", User.age > 30)
+        Returns:
+            The `QueryBuilder` instance for further chaining.
         """
         self._statement = self._statement.where(*args)
         return self
@@ -318,85 +342,83 @@ class QueryBuilder:
         """
         Adds an ORDER BY clause to the query.
 
-        Accepts multiple field names. A '-' prefix indicates
-        descending order.
+        Args:
+            *args: Field names to order by. Prefix a name with `-` for
+                descending order (e.g., `"-id"`).
 
-        Example:
-            User.order_by("-id", "name")
+        Returns:
+            The `QueryBuilder` instance for further chaining.
         """
         for field in args:
-            if not field:
-                continue
+            if not isinstance(field, str) or not field:
+                raise InvalidQueryError("order_by() expects non-empty string arguments.")
             desc = field.startswith("-")
             field_name = field.lstrip("-")
 
             if not hasattr(self._model_cls, field_name):
-                raise AttributeError(
-                    f"'{self._model_cls.__name__}' has no attribute '{field_name}'"
-                )
+                raise AttributeError(f"'{self._model_cls.__name__}' has no attribute '{field_name}'")
             column = getattr(self._model_cls, field_name)
-
-            if desc:
-                self._statement = self._statement.order_by(column.desc())
-            else:
-                self._statement = self._statement.order_by(column.asc())
+            self._statement = self._statement.order_by(column.desc() if desc else column.asc())
         return self
 
     def limit(self, number: int) -> "QueryBuilder[T]":
-        """
-        Adds a LIMIT clause to the query.
-        """
+        """Adds a LIMIT clause to the query."""
         self._statement = self._statement.limit(number)
         return self
 
     def offset(self, number: int) -> "QueryBuilder[T]":
-        """
-        Adds an OFFSET clause to the query.
-        """
+        """Adds an OFFSET clause to the query."""
         self._statement = self._statement.offset(number)
         return self
 
     def paginate(self, limit: int, offset: int = 0) -> "QueryBuilder[T]":
         """
-        Convenience helper that applies both LIMIT and OFFSET in one call.
+        Applies LIMIT and OFFSET clauses for pagination.
+
+        Args:
+            limit: The number of records to return per page.
+            offset: The number of records to skip. Defaults to 0.
+
+        Returns:
+            The `QueryBuilder` instance for further chaining.
         """
         self._statement = self._statement.limit(limit).offset(offset)
         return self
 
     def related(
         self,
-        relationship_attr,
+        relationship_attr: InstrumentedAttribute,
         *,
-        where=None,
+        where: Optional[Sequence[ClauseElement]] = None,
         aggregate: Optional[str] = None,
-        having=None,
-        order_by=None,
+        having: Optional[Sequence[Callable[[Any], ClauseElement]]] = None,
+        order_by: Optional[Sequence[str]] = None,
         loader: str = "selectin",
     ) -> "QueryBuilder[T]":
         """
-        Adds filters/order/eager loading based on a relationship.
+        Configures eager loading and/or filtering based on a relationship.
+
+        This is the primary tool for solving N+1 query problems and for
+        filtering a model based on its related data.
 
         Args:
-            relationship_attr: A SQLAlchemy relationship attribute (e.g., User.posts).
-            where: Clause or list of clauses applied to the related entity.
-            aggregate: One of {"exists", "all", "count"}.
-            having: Clause or list evaluated against aggregate expressions (only for "count").
-            order_by: Ordering directives (only for "count").
-            eager: False, True (defaults to selectinload), "selectin", or "joined".
+            relationship_attr: The relationship attribute on the model (e.g., `User.posts`).
+            where: A list of filter clauses to apply to the related model.
+            aggregate: The aggregation mode. Can be "exists" (default), "all", or "count".
+            having: A list of filter clauses to apply to the result of a "count" aggregate.
+            order_by: A list of ordering clauses for a "count" aggregate.
+            loader: The eager loading strategy. Can be "selectin" (default) or "joined".
 
-        Note:
-            `related()` currently only supports direct (single-hop) relationships off the root model.
-            Multi-level paths (e.g., `User.posts.comments`) must be expressed via SQLAlchemy directly or
-            broken into multiple queries.
+        Returns:
+            The `QueryBuilder` instance for further chaining.
         """
         if self._related_used:
-            raise ValueError("related() can only be invoked once per query.")
-
+            raise InvalidQueryError("related() can only be called once per query.")
         path = self._resolve_relationship_path(relationship_attr)
         agg = (aggregate or "exists").lower()
-        where_clauses = self._ensure_sequence(where)
-        having_clauses = self._ensure_sequence(having)
-        order_clauses = self._ensure_sequence(order_by)
+        where_clauses, having_clauses, order_clauses = map(
+            self._ensure_sequence, (where, having, order_by)
+        )
 
         loader_choice = self._determine_loader(path, loader)
         self._apply_eager_option(path, loader_choice)
@@ -408,20 +430,20 @@ class QueryBuilder:
         elif agg == "count":
             self._apply_count(path, where_clauses, having_clauses, order_clauses)
         else:
-            raise ValueError("aggregate must be one of {'exists', 'all', 'count'}.")
+            raise ValueError(f"Invalid aggregate option '{agg}'. Must be 'exists', 'all', or 'count'.")
 
         self._related_used = True
         return self
 
-    def alchemize(self):
+    def alchemize(self) -> select:
         """
-        The "escape hatch".
+        Returns the underlying SQLAlchemy `Select` object.
 
-        Transmutes the current high-level query into a raw
-        SQLAlchemy Select object for advanced customization.
+        This "escape hatch" allows for advanced customization of the query
+        using the full power of SQLAlchemy Core.
 
         Returns:
-            sqlalchemy.sql.Select: The underlying query object.
+            A SQLAlchemy `select` construct.
         """
         return self._statement
 
@@ -429,202 +451,110 @@ class QueryBuilder:
 
     def first(self) -> Optional[T]:
         """
-        Fetches the first record matched by the query.
-        This is a terminal method.
-
-        Returns:
-            A model instance or None if no record is found.
+        Executes the query and returns the first matching record or `None`.
         """
         return _first(self)
 
     def all(self) -> List[T]:
         """
-        Fetches all records matched by the query.
-        This is a terminal method.
-
-        Returns:
-            A list of model instances.
+        Executes the query and returns a list of all matching records.
         """
         return _all(self)
 
     def one(self) -> T:
         """
-        Fetches exactly one record matched by the query.
-        Raises ObjectNotFoundError or MultipleObjectsFoundError as appropriate.
+        Executes the query and returns exactly one record.
+
+        Raises:
+            ObjectNotFoundError: If no records are found.
+            MultipleObjectsFoundError: If more than one record is found.
         """
         return _one(self)
 
     def count(self) -> int:
-        """
-        Returns the total number of records matched by the query.
-        This is a terminal method.
-        """
+        """Executes the query and returns the total number of matching records."""
         return _count(self)
 
     def exists(self) -> bool:
-        """
-        Returns True if the query matches at least one record.
-        """
+        """Executes the query and returns `True` if at least one record exists."""
         return _exists(self)
 
     def update(self, **values) -> None:
         """
-        Performs a bulk update on the records matched by the query.
+        Performs a bulk update on all records matched by the query.
+
         This is a terminal method and does not return any records.
         """
         return _update(self, **values)
 
     def delete(self) -> None:
         """
-        Performs a bulk delete on the records matched by the query.
+        Performs a bulk delete on all records matched by the query.
+
         This is a terminal method and does not return any records.
         """
         return _delete(self)
 
     # --- Internal helpers ---
 
-    def _resolve_relationship_path(self, relationship_attr) -> List:
-        """Validates and returns a single-step relationship path."""
-        if not hasattr(relationship_attr, "property"):
+    def _resolve_relationship_path(self, attr: Any) -> List[InstrumentedAttribute]:
+        if not hasattr(attr, "property") or not isinstance(attr.property, RelationshipProperty):
             raise TypeError("related() expects a SQLAlchemy relationship attribute.")
-        prop = relationship_attr.property
-        if not isinstance(prop, RelationshipProperty):
-            raise TypeError("related() expects a relationship attribute, not a column.")
+        if attr.parent.class_ is not self._model_cls:
+            raise InvalidQueryError("related() only supports direct relationships from the root model.")
+        return [attr]
 
-        parent_cls = relationship_attr.parent.class_
-        if parent_cls is not self._model_cls:
-            raise ValueError(
-                "related() currently supports only direct relationships from the root model."
-            )
-        return [relationship_attr]
-
-    def _ensure_sequence(self, value) -> List:
+    @staticmethod
+    def _ensure_sequence(value: Any) -> List[Any]:
         if value is None:
             return []
-        if isinstance(value, (list, tuple)):
-            return list(value)
-        return [value]
+        return list(value) if isinstance(value, (list, tuple)) else [value]
 
-    def _combine_clauses(self, clauses: Sequence) -> Any:
-        if not clauses:
-            return true()
-        return and_(*clauses)
-
-    def _apply_exists(self, path: List, where_clauses: Sequence) -> None:
-        """
-        aggregate="exists" uses SQLAlchemy's .any() to test whether at least one related row matches.
-        """
-        if not where_clauses:
-            return
-        predicate = self._combine_clauses(where_clauses)
-        expr = self._build_exists_expression(path, predicate)
-        self._statement = self._statement.where(expr)
-
-    def _apply_all(self, path: List, where_clauses: Sequence) -> None:
-        """
-        aggregate="all" uses the double-negative trick: ALL(pred) == NOT EXISTS(not pred).
-        """
-        if not where_clauses:
-            raise ValueError("aggregate='all' requires at least one WHERE predicate.")
-        predicate = self._combine_clauses(where_clauses)
-        expr = self._build_all_expression(path, predicate)
-        self._statement = self._statement.where(expr)
-
-    def _apply_count(
-        self,
-        path: List,
-        where_clauses: Sequence,
-        having_clauses: Sequence,
-        order_clauses: Sequence,
-    ) -> None:
-        """
-        aggregate="count" builds a correlated subquery counting related rows, then allows HAVING/ORDER BY on it.
-        """
-        count_expr = self._build_count_expression(path, where_clauses)
-        for clause in having_clauses:
-            rendered = clause(count_expr) if callable(clause) else clause
-            self._statement = self._statement.where(rendered)
-        for clause in order_clauses:
-            self._statement = self._statement.order_by(
-                self._build_order_clause(clause, count_expr)
-            )
-
-    def _build_exists_expression(self, path: List, predicate) -> Any:
-        expr = predicate
-        for attr in reversed(path):
-            expr = attr.any(expr)
-        return expr
-
-    def _build_all_expression(self, path: List, predicate) -> Any:
-        expr = predicate
-        for attr in reversed(path):
-            expr = ~attr.any(~expr)
-        return expr
-
-    def _build_count_expression(self, path: List, where_clauses: Sequence) -> Any:
-        """
-        Build a correlated COUNT(*) subquery tied back to the parent entity.
-
-        Steps:
-            1. Start from the related entity's selectable, applying any WHERE clauses.
-            2. Walk the relationship path backwards to join secondary tables / parent tables.
-            3. Use correlate(parent_table) so SQLAlchemy links the inner COUNT to the outer statement.
-        """
-        target_cls = path[-1].property.entity.class_
-        mapper = sa_inspect(target_cls)
-        target_table = mapper.selectable
-        pk_cols = mapper.primary_key
-        if pk_cols:
-            count_target = pk_cols[0]
-        else:
-            count_target = next(iter(target_table.c.values()))
-
-        stmt = select(func.count(func.distinct(count_target))).select_from(target_table)
-        if where_clauses:
-            stmt = stmt.where(*where_clauses)
-
-        from_clause = target_table
-        reversed_path = list(reversed(path))
-
-        for attr in reversed_path:
-            rel = attr.property
-            parent_cls = rel.parent.class_
-            parent_table = sa_inspect(parent_cls).selectable
-
-            if rel.secondary is not None:
-                from_clause = from_clause.join(rel.secondary, rel.secondaryjoin)
-
-            if parent_cls is self._model_cls:
-                stmt = stmt.where(rel.primaryjoin)
-                stmt = stmt.correlate(parent_table)
-            else:
-                from_clause = from_clause.join(parent_table, rel.primaryjoin)
-
-        stmt = stmt.select_from(from_clause)
-        return stmt.scalar_subquery()
-
-    def _build_order_clause(self, clause, aggregate_expr):
+    @staticmethod
+    def _build_order_clause(clause: Any, agg_expr: Any) -> Any:
         if isinstance(clause, str):
             key = clause.lstrip("-").lower()
             if key != "count":
-                raise ValueError("order_by only supports 'count' when aggregate='count'.")
-            return aggregate_expr.desc() if clause.startswith("-") else aggregate_expr.asc()
-        if callable(clause):
-            return clause(aggregate_expr)
-        return clause
+                raise ValueError("When using aggregate='count', order_by only supports 'count' or '-count'.")
+            return agg_expr.desc() if clause.startswith("-") else agg_expr.asc()
+        return clause(agg_expr) if callable(clause) else clause
 
-    def _determine_loader(self, path: List, loader_option) -> str:
-        if loader_option not in {"selectin", "joined"}:
-            raise ValueError("loader must be 'selectin' or 'joined'.")
-        if loader_option == "selectin" and not path[0].property.uselist:
-            return "joined"
-        return loader_option
+    def _determine_loader(self, path: List[InstrumentedAttribute], loader_opt: str) -> str:
+        if loader_opt not in {"selectin", "joined"}:
+            raise ValueError("Loader must be 'selectin' or 'joined'.")
+        # Use joinedload for one-to-one or many-to-one relationships.
+        return "joined" if not path[0].property.uselist and loader_opt == "selectin" else loader_opt
 
-    def _apply_eager_option(self, path: List, loader_type: str):
-        loader = selectinload(path[0]) if loader_type == "selectin" else joinedload(path[0])
-        for attr in path[1:]:
-            loader = (
-                loader.selectinload(attr) if loader_type == "selectin" else loader.joinedload(attr)
-            )
+    def _apply_eager_option(self, path: List[InstrumentedAttribute], loader_type: str):
+        loader = selectinload if loader_type == "selectin" else joinedload
+        self._statement = self._statement.options(loader(*path))
 
-        self._statement = self._statement.options(loader)
+    def _apply_exists(self, path: List[InstrumentedAttribute], wheres: List[ClauseElement]):
+        if not wheres:
+            return
+        self._statement = self._statement.where(path[0].any(and_(*wheres)))
+
+    def _apply_all(self, path: List[InstrumentedAttribute], wheres: List[ClauseElement]):
+        if not wheres:
+            raise ValueError("aggregate='all' requires at least one WHERE clause.")
+        self._statement = self._statement.where(~path[0].any(~and_(*wheres)))
+
+    def _apply_count(
+        self,
+        path: List[InstrumentedAttribute],
+        wheres: List[ClauseElement],
+        havings: List[Callable],
+        orders: List[Any],
+    ):
+        target_cls = path[0].property.entity.class_
+        pk_col = sa_inspect(target_cls).primary_key[0]
+
+        count_subquery = select(func.count(pk_col)).where(path[0].property.primaryjoin)
+        if wheres:
+            count_subquery = count_subquery.where(and_(*wheres))
+        count_expr = count_subquery.correlate(self._model_cls).scalar_subquery()
+
+        for clause in havings:
+            self._statement = self._statement.where(clause(count_expr))
+        for clause in orders:
+            self._statement = self._statement.order_by(self._build_order_clause(clause, count_expr))

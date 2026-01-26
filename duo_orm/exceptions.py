@@ -8,12 +8,12 @@ errors specific to the ORM's operation, rather than generic Python errors.
 """
 
 
-class YourOrmError(Exception):
+class DuoOrmError(Exception):
     """Base exception for all errors raised by DuoORM."""
     pass
 
 
-class ConfigurationError(YourOrmError):
+class ConfigurationError(DuoOrmError):
     """
     Raised when there is a problem with the ORM's configuration.
 
@@ -23,7 +23,7 @@ class ConfigurationError(YourOrmError):
     pass
 
 
-class ObjectNotFoundError(YourOrmError):
+class ObjectNotFoundError(DuoOrmError):
     """
     Raised when a query that expects a single result finds none.
 
@@ -32,7 +32,7 @@ class ObjectNotFoundError(YourOrmError):
     pass
 
 
-class MultipleObjectsFoundError(YourOrmError):
+class MultipleObjectsFoundError(DuoOrmError):
     """
     Raised when a query that expects a single result finds multiple.
 
@@ -41,7 +41,7 @@ class MultipleObjectsFoundError(YourOrmError):
     pass
 
 
-class InvalidQueryError(YourOrmError):
+class InvalidQueryError(DuoOrmError):
     """
     Raised when a query is constructed in an invalid way, for example
     by passing an unsupported operator.
@@ -58,7 +58,7 @@ class UnsupportedOperationError(InvalidQueryError):
     pass
 
 
-class IntegrityError(YourOrmError):
+class IntegrityError(DuoOrmError):
     """
     Raised when a database integrity constraint is violated.
 
@@ -69,7 +69,7 @@ class IntegrityError(YourOrmError):
     pass
 
 
-class ValidationError(YourOrmError):
+class ValidationError(DuoOrmError):
     """
     Raised when model-level validation fails.
 

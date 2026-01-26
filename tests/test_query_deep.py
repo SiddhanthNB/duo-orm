@@ -4,6 +4,7 @@ import pytest
 from sqlalchemy import ARRAY, Integer, JSON as SAJSON, func
 
 from duo_orm import Mapped, mapped_column, array, json
+from duo_orm.exceptions import InvalidQueryError
 from duo_orm.query import (
     _is_json_column,
     _is_array_column,
@@ -94,8 +95,9 @@ def test_querybuilder_internal_paths(db):
     User, Post = _build_models(db)
     qb = QueryBuilder(User, db=db)
 
-    # order_by skips falsy fields
-    qb.order_by("", None)
+    # order_by rejects falsy/invalid fields
+    with pytest.raises(InvalidQueryError):
+        qb.order_by("", None)
 
     path = qb._resolve_relationship_path(User.posts)
 

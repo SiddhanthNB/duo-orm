@@ -13,6 +13,7 @@ from duo_orm.exceptions import (
     MultipleObjectsFoundError,
     ObjectNotFoundError,
     ValidationError,
+    InvalidQueryError,
 )
 from duo_orm.session import active_session_var
 from tests.conftest import StatementCounter
@@ -397,7 +398,7 @@ def test_array_helper_requires_array_column(sync_models):
 
 def test_related_cannot_be_chained(sync_models):
     User, Post, _ = sync_models
-    with pytest.raises(ValueError):
+    with pytest.raises(InvalidQueryError):
         User.related(User.posts).related(User.posts)
 
 
@@ -406,7 +407,7 @@ def test_order_by_invalid_field_raises(sync_models):
     with pytest.raises(AttributeError):
         User.order_by("does_not_exist").all()
 
-    with pytest.raises(AttributeError):
+    with pytest.raises(InvalidQueryError):
         User.order_by(123).all()  # non-string input should fail
 
 
