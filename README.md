@@ -349,4 +349,6 @@ pytest --db-url "sqlite:///./test.sqlite"
 pytest --db-url "postgresql://user:pass@host:5432/dbname"
 ```
 
+If you have `pytest-cov` installed and want coverage, set `PYTEST_ADDOPTS="--cov=duo_orm --cov-report=term-missing --cov-report=html"` before running pytest.
+
 JSON/ARRAY helper tests are skipped with explicit reasons on dialects that lack SQLAlchemy operator support.

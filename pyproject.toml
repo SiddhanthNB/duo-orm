@@ -64,6 +64,7 @@ sqlite = ["aiosqlite>=0.20"]
 dev = [
     "pytest>=7.0",
     "pytest-asyncio>=0.20",
+    "pytest-cov>=4.1",
     "ruff>=0.1",
     "black>=23.0",
 ]
@@ -77,3 +78,6 @@ select = ["E", "F", "W", "I"] # Standard flake8 rules + isort
 
 [tool.black]
 line-length = 88
+
+[tool.pytest.ini_options]
+addopts = "-ra"

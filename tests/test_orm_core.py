@@ -406,6 +406,9 @@ def test_order_by_invalid_field_raises(sync_models):
     with pytest.raises(AttributeError):
         User.order_by("does_not_exist").all()
 
+    with pytest.raises(AttributeError):
+        User.order_by(123).all()  # non-string input should fail
+
 
 def test_standalone_session_does_not_set_contextvar(sync_models):
     User, _, db = sync_models
@@ -421,7 +424,7 @@ def test_standalone_session_does_not_set_contextvar(sync_models):
 
 def test_json_helpers_on_supported_dialect(db_target):
     if db_target.is_async or not db_target.supports_json:
-        pytest.skip("Dialect does not support JSON operations in sync mode.")
+        pytest.skip(f"JSON helpers require PostgreSQL-style operators; got {db_target.dialect}.")
 
     db = Database(db_target.url)
 
@@ -461,14 +464,14 @@ def test_json_helpers_on_supported_dialect(db_target):
 
 def test_array_helpers_on_supported_dialect(db_target):
     if db_target.is_async or not db_target.supports_array:
-        pytest.skip("Dialect does not support ARRAY columns in sync mode.")
+        pytest.skip(f"ARRAY helpers require PostgreSQL ARRAY support; got {db_target.dialect}.")
 
     db = Database(db_target.url)
 
     try:
         from sqlalchemy.dialects.postgresql import ARRAY as PG_ARRAY  # type: ignore
     except Exception:
-        pytest.skip("PostgreSQL ARRAY type not available.")
+        pytest.skip("PostgreSQL ARRAY type not available in this environment.")
 
     class Item(db.Model):
         __tablename__ = "items"

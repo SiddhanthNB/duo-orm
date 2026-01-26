@@ -14,6 +14,7 @@ from sqlalchemy.exc import NoSuchModuleError
 
 from duo_orm import Database
 from duo_orm.db import _DIALECT_ALIASES
+from sqlalchemy.exc import OperationalError, DatabaseError
 
 
 def pytest_addoption(parser):
@@ -27,7 +28,6 @@ def pytest_addoption(parser):
         default=None,
         help="Database URL for sync/async tests. Optional dialect=url label is allowed (e.g., postgres=postgresql+psycopg://...).",
     )
-
 
 @dataclass(frozen=True)
 class DbTarget:
@@ -219,7 +219,13 @@ def db(db_target, cli_schema):
     """Sync Database instance for tests."""
     if db_target.is_async:
         pytest.skip("Sync tests expect a synchronous driver URL.")
-    return Database(db_target.url)
+    database = Database(db_target.url)
+    try:
+        with database.sync_engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+    except (OperationalError, DatabaseError, OSError) as exc:
+        pytest.skip(f"Cannot connect to DB '{db_target.url}': {exc}")
+    return database
 
 
 @pytest_asyncio.fixture
@@ -229,6 +235,11 @@ async def async_db(db_target, cli_schema):
         database = Database(db_target.url, derive_async=True)
     except ValueError as exc:
         pytest.skip(f"Async not available for this URL: {exc}")
+    try:
+        with database.sync_engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+    except (OperationalError, DatabaseError, OSError) as exc:
+        pytest.skip(f"Cannot connect to DB '{db_target.url}': {exc}")
     return database
 
 

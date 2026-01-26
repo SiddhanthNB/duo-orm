@@ -22,8 +22,10 @@ __pycache__/
 *.sqlite
 *.sh
 TODO.md
+.coverage
+.coverage.*
 
 /.venv/
 
 .env
-CONTEXT.md
+.env.*
