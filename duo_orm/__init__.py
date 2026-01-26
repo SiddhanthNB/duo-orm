@@ -7,7 +7,7 @@ This package provides a clean, symmetrical API for synchronous and
 asynchronous database operations, built on SQLAlchemy 2.0.
 """
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 # Apply lightweight operator ergonomics
 from . import patch  # noqa: F401
