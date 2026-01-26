@@ -37,6 +37,9 @@ dependencies = [
     "aiosqlite>=0.17",
 ]
 
+[tool.setuptools.packages.find]
+include = ["duo_orm*"]
+
 [project.urls]
 "Homepage" = "https://github.com/SiddhanthNB/duo-orm"
 "Bug Tracker" = "https://github.com/SiddhanthNB/duo-orm/issues"
