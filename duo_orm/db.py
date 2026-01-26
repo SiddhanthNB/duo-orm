@@ -191,6 +191,25 @@ class Database:
                 raise ConfigurationError(f"Failed to create async engine for '{self._async_url}'. Check URL and ensure driver is installed.") from exc
         return self._async_engine
 
+    def disconnect(self) -> None:
+        """
+        Disposes any initialized sync/async engines and resets cached factories.
+
+        This is a convenience for scripts/CLIs that want to release connections
+        before process exit. It is safe to call multiple times; subsequent
+        access to `sync_engine`/`async_engine` will recreate engines lazily.
+        """
+        if self._sync_engine is not None:
+            self._sync_engine.dispose()
+            self._sync_engine = None
+            self._sync_session_factory = None
+        if self._async_engine is not None:
+            # async engine exposes sync dispose that closes pools;
+            # safe to call without awaiting.
+            self._async_engine.sync_engine.dispose()
+            self._async_engine = None
+            self._async_session_factory = None
+
     @property
     def sync_session_factory(self) -> sessionmaker:
         """The factory for creating synchronous SQLAlchemy `Session` objects."""

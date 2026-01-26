@@ -24,7 +24,24 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy import Table, ForeignKey, UniqueConstraint, CheckConstraint, Index, not_
 
 # 4. The Types Kit
-from sqlalchemy import types
+from sqlalchemy import (
+    types,
+    Integer,
+    BigInteger,
+    SmallInteger,
+    String,
+    Text,
+    Boolean,
+    DateTime,
+    Date,
+    Time,
+    Float,
+    Numeric,
+    UUID,
+    JSON,
+    LargeBinary,
+)
+from sqlalchemy.dialects.postgresql import ARRAY as PG_ARRAY
 
 # 5. The SQL Functions & Helpers Kit
 from sqlalchemy import func, text, select
@@ -62,6 +79,21 @@ __all__ = [
     "not_",
     # Types Kit
     "types",
+    "Integer",
+    "BigInteger",
+    "SmallInteger",
+    "String",
+    "Text",
+    "Boolean",
+    "DateTime",
+    "Date",
+    "Time",
+    "Float",
+    "Numeric",
+    "UUID",
+    "JSON",
+    "LargeBinary",
+    "PG_ARRAY",
     # SQL Functions & Helpers Kit
     "func",
     "text",

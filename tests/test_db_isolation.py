@@ -42,6 +42,9 @@ def test_database_respects_explicit_async_url(tmp_path):
     assert db.async_url.startswith("sqlite+aiosqlite")
     assert db.async_url.endswith(str(async_path))
 
+    # cleanup helper should not error
+    db.disconnect()
+
 
 def test_metadata_create_and_drop_all(tmp_path):
     db = Database(f"sqlite:///{tmp_path/'meta.sqlite'}")
