@@ -1,6 +1,6 @@
 # User Guides: Defining Models
 
-Models are the heart of your application's data layer. In Duo ORM, a model is a Python class that inherits from the `db.Model` base class provided by your `Database` instance. Each model maps to a table in your database.
+Models are the heart of your application's data layer. In DuoORM, a model is a Python class that inherits from the `db.Model` base class provided by your `Database` instance. Each model maps to a table in your database.
 
 ## Basic Model Definition
 
@@ -18,10 +18,10 @@ class User(db.Model):
     age: Mapped[int]
 ```
 
-Duo ORM uses modern SQLAlchemy 2.0 syntax, which relies on `Mapped` to indicate which attributes are part of the database mapping.
+DuoORM uses modern SQLAlchemy 2.0 syntax, which relies on `Mapped` to indicate which attributes are part of the database mapping.
 
 !!! tip
-    All your models should inherit from the **same** `db.Model` object. This is how Duo ORM associates your models with the correct database connection and metadata.
+    All your models should inherit from the **same** `db.Model` object. This is how DuoORM associates your models with the correct database connection and metadata.
 
 ## Column Configuration
 
@@ -51,11 +51,11 @@ class Product(db.Model):
     description: Mapped[str | None]
 ```
 
-Duo ORM re-exports all of SQLAlchemy's standard types and constraints, so you can import them directly from `duo_orm`.
+DuoORM re-exports all of SQLAlchemy's standard types and constraints, so you can import them directly from `duo_orm`.
 
 ## Automatic Timestamps
 
-Duo ORM provides a declarative, Django-style way to automatically manage creation and update timestamps. You can add `info` flags to a `mapped_column` to control this behavior.
+DuoORM provides a declarative, Django-style way to automatically manage creation and update timestamps. You can add `info` flags to a `mapped_column` to control this behavior.
 
 - `info={"set_on": "create"}`: The field will be set to the current UTC timestamp only when the record is first inserted.
 - `info={"set_on": {"create", "update"}}`: The field will be set on insert and also every time the record is updated via `.save()`.

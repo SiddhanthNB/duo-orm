@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.engine import make_url, URL
 
 from .session import active_session_var, is_async_context
-from .basemodel import _YourOrmMethods
+from .basemodel import _DuoOrmMethods
 from .exceptions import ConfigurationError
 
 
@@ -128,7 +128,7 @@ class Database:
 
         # Manufacture the final, user-facing Model class by combining
         # SQLAlchemy's base with our custom Active Record methods.
-        class Model(Base, _YourOrmMethods):
+        class Model(Base, _DuoOrmMethods):
             __abstract__ = True
             # Inject a reference to this specific `db` instance
             # directly into the Model class itself.
@@ -278,7 +278,7 @@ class Database:
         """
         Provides a context-managed transactional scope for database operations.
 
-        This method is the heart of the Unit of Work pattern in Duo ORM.
+        This method is the heart of the Unit of Work pattern in DuoORM.
         It automatically detects if it's in a sync or async context and returns
         the appropriate context manager. All database operations within the
         `with` or `async with` block will share a single session.
@@ -299,7 +299,7 @@ class Database:
         Provides a raw, unmanaged SQLAlchemy `AsyncSession`.
 
         This is an "escape hatch" for advanced use cases that require direct
-        control over the session, outside of Duo ORM's managed context.
+        control over the session, outside of DuoORM's managed context.
         You are responsible for committing or rolling back the session.
 
         Yields:

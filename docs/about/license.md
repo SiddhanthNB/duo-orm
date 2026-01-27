@@ -1,6 +1,6 @@
 # License
 
-Duo ORM is licensed under the MIT License.
+DuoORM is licensed under the MIT License.
 
 ```text
 MIT License

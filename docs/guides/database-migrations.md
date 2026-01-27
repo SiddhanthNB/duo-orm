@@ -1,6 +1,6 @@
 # User Guides: Database Migrations
 
-Duo ORM provides a command-line tool, `duo-orm`, to manage your database schema evolution. This tool is a wrapper around the powerful [Alembic](https://alembic.sqlalchemy.org/) library, providing an opinionated and streamlined workflow.
+DuoORM provides a command-line tool, `duo-orm`, to manage your database schema evolution. This tool is a wrapper around the powerful [Alembic](https://alembic.sqlalchemy.org/) library, providing an opinionated and streamlined workflow.
 
 ## The Migration Workflow
 
@@ -21,7 +21,7 @@ duo-orm init
 This command does several things:
 
 1.  **Creates a directory structure**: By default, it creates a `db/` directory with subdirectories for `models` and `migrations`.
-2.  **Generates configuration**: It creates an `alembic.ini` and `env.py` file inside `db/migrations/` that are pre-configured to work with Duo ORM.
+2.  **Generates configuration**: It creates an `alembic.ini` and `env.py` file inside `db/migrations/` that are pre-configured to work with DuoORM.
 3.  **Creates a database entrypoint**: It generates a `db/database.py` file where you will configure your `Database` instance.
 4.  **Updates `pyproject.toml`**: It saves your configuration to your project's `pyproject.toml` file, so you don't have to specify it again.
 

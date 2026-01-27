@@ -314,7 +314,7 @@ class QueryBuilder:
     (like `.first()`, `.all()`) to execute it.
 
     Instances of this class are created by calling class-level methods on a
-    Duo ORM model (e.g., `User.where(...)`).
+    DuoORM model (e.g., `User.where(...)`).
     """
 
     def __init__(self, model_cls: Type[T], db: "Database"):

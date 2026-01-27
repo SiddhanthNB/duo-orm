@@ -1,13 +1,13 @@
 # User Guides: Sessions and Transactions
 
-A key design principle of Duo ORM is making the "Unit of Work" explicit. The library operates in two distinct modes: the default **statement-driven** mode and an opt-in **transaction-driven** mode. Understanding the difference is key to using the ORM effectively.
+A key design principle of DuoORM is making the "Unit of Work" explicit. The library operates in two distinct modes: the default **statement-driven** mode and an opt-in **transaction-driven** mode. Understanding the difference is key to using the ORM effectively.
 
 ## Statement-Driven Mode (Default)
 
 By default, every single ORM operation is its own isolated "micro-transaction".
 
 - **Action**: You call `await user.save()` or `await User.first()`.
-- **Behind the Scenes**: Duo ORM creates a new, temporary session, executes exactly one statement, commits the result (for writes), and immediately closes the session.
+- **Behind the Scenes**: DuoORM creates a new, temporary session, executes exactly one statement, commits the result (for writes), and immediately closes the session.
 
 ```python
 # Statement-Driven Example
@@ -54,7 +54,7 @@ For these related workflows, you need a transaction.
 When you need to perform multiple operations as a single, atomic unit of work, you must "opt-in" to a transaction using the `db.transaction()` context manager.
 
 - **Action**: You wrap your code in `async with db.transaction():` or `with db.transaction():`.
-- **Behind the Scenes**: Duo ORM creates a single, shared session that is kept open for the entire duration of the `with` block. All ORM calls made inside the block will use this same session.
+- **Behind the Scenes**: DuoORM creates a single, shared session that is kept open for the entire duration of the `with` block. All ORM calls made inside the block will use this same session.
 
 ```python
 from db.models import User, Post
@@ -111,7 +111,7 @@ This pattern ensures that each API request is handled as an atomic transaction.
 
 ## The Power User Escape Hatch: `standalone_session`
 
-What if you need complete, manual control over the session, perhaps for a very complex query or to use an advanced SQLAlchemy feature? For this, Duo ORM provides `db.standalone_session()`.
+What if you need complete, manual control over the session, perhaps for a very complex query or to use an advanced SQLAlchemy feature? For this, DuoORM provides `db.standalone_session()`.
 
 This context manager gives you a raw, unmanaged SQLAlchemy `Session` or `AsyncSession`. You are responsible for all operations, including flushing, committing, and rolling back.
 
@@ -119,7 +119,7 @@ This context manager gives you a raw, unmanaged SQLAlchemy `Session` or `AsyncSe
 from duo_orm import text
 from db.database import db
 
-# This session is NOT managed by Duo ORM's contextvars.
+# This session is NOT managed by DuoORM's contextvars.
 # It is for your use only.
 async with db.standalone_session() as session:
     # You can use raw SQLAlchemy Core expressions
@@ -130,7 +130,7 @@ async with db.standalone_session() as session:
     # You must commit changes manually
     # await session.commit()
 ```
-This is an advanced feature and should only be used when the standard Duo ORM patterns do not fit your needs.
+This is an advanced feature and should only be used when the standard DuoORM patterns do not fit your needs.
 
 ## Summary
 

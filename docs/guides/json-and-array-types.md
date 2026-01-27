@@ -1,6 +1,6 @@
 # User Guides: JSON and ARRAY Types
 
-For databases that support them (most notably PostgreSQL), Duo ORM provides expressive, Pythonic helpers for querying complex `JSON` and `ARRAY` data types. These helpers, `json()` and `array()`, allow you to write readable filters without needing to remember dialect-specific SQL operators.
+For databases that support them (most notably PostgreSQL), DuoORM provides expressive, Pythonic helpers for querying complex `JSON` and `ARRAY` data types. These helpers, `json()` and `array()`, allow you to write readable filters without needing to remember dialect-specific SQL operators.
 
 !!! tip
     While many databases can store JSON as text, the rich operator support described here is primarily available on PostgreSQL. The helpers will raise a `TypeError` if used on an unsupported database dialect.

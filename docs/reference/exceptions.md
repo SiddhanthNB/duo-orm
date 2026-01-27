@@ -1,6 +1,6 @@
 # Reference: Exceptions
 
-Duo ORM defines a set of custom exceptions that inherit from a base `DuoOrmError`. This allows you to write `try...except` blocks that specifically target errors raised by the ORM.
+DuoORM defines a set of custom exceptions that inherit from a base `DuoOrmError`. This allows you to write `try...except` blocks that specifically target errors raised by the ORM.
 
 ::: duo_orm.exceptions
     options:

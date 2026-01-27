@@ -1,6 +1,6 @@
 # Contributing
 
-Contributions are welcome! We are excited to see the community help improve and grow Duo ORM.
+Contributions are welcome! We are excited to see the community help improve and grow DuoORM.
 
 ## Getting Started
 
@@ -34,4 +34,4 @@ We are looking for help in several areas:
 -   **Documentation**: Improvements to the documentation are always welcome.
 -   **Dialect Support**: Expanding and improving support for different database backends (MySQL, Oracle, MSSQL) is a high priority.
 
-Thank you for your interest in contributing to Duo ORM!
+Thank you for your interest in contributing to DuoORM!

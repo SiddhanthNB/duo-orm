@@ -1,6 +1,6 @@
 # User Guides: Querying Data
 
-Duo ORM provides a fluent, chainable API for building database queries. All queries start with the model class itself and use methods like `.where()`, `.order_by()`, and `.related()` to construct a query.
+DuoORM provides a fluent, chainable API for building database queries. All queries start with the model class itself and use methods like `.where()`, `.order_by()`, and `.related()` to construct a query.
 
 The query is not executed until you call a **terminal method** like `.first()`, `.all()`, or `.count()`.
 
@@ -48,7 +48,7 @@ real_users = await User.where(not_(User.name == 'guest')).all()
 
 ### Common Filter Operators
 
-Duo ORM models support a wide range of operators for common filtering tasks.
+DuoORM models support a wide range of operators for common filtering tasks.
 
 | Method             | Description                          | Example                                       |
 | ------------------ | ------------------------------------ | --------------------------------------------- |
@@ -97,7 +97,7 @@ A query is only sent to the database when you call one of these terminal methods
 
 ## Working with Relationships: `.related()`
 
-A common performance problem in ORMs is the "N+1 query problem," where fetching N items requires N+1 separate database queries. Duo ORM provides the `.related()` method to solve this by eagerly loading related objects in a single, efficient operation.
+A common performance problem in ORMs is the "N+1 query problem," where fetching N items requires N+1 separate database queries. DuoORM provides the `.related()` method to solve this by eagerly loading related objects in a single, efficient operation.
 
 Let's assume a `User` has a one-to-many relationship to `Post`.
 
@@ -168,7 +168,7 @@ If you need to build a query that is too complex for the fluent API, you can use
 ```python
 from duo_orm import text
 
-# Build the base query in Duo ORM
+# Build the base query in DuoORM
 query_builder = User.where(User.age > 20)
 
 # Eject to raw SQLAlchemy for advanced features
@@ -178,4 +178,4 @@ sa_stmt = query_builder.alchemize().where(text("name like 'A%'"))
 async with db.standalone_session() as session:
     results = (await session.execute(sa_stmt)).scalars().all()
 ```
-This gives you a path to advanced query patterns without leaving the Duo ORM ecosystem.
+This gives you a path to advanced query patterns without leaving the DuoORM ecosystem.

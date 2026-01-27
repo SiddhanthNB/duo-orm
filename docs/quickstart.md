@@ -150,7 +150,7 @@ async def main():
         alice = User(name="Alice", age=30)
         await alice.save()
 
-        await Post(title="Duo ORM Quickstart", author=alice).save()
+        await Post(title="DuoORM Quickstart", author=alice).save()
         await Post(title="Advanced Queries", author=alice).save()
 
         user_with_posts = await User.related("posts").where(User.name == "Alice").first()
