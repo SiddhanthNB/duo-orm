@@ -20,7 +20,6 @@ from sqlalchemy import (
     select,
     func,
     and_,
-    true,
     inspect as sa_inspect,
     Boolean,
     Float,
@@ -49,6 +48,44 @@ if TYPE_CHECKING:
 
 # This helps with type hinting for the model class itself.
 T = TypeVar("T")
+
+# Maximum relationship depth allowed in a path to avoid runaway eager chains.
+_MAX_RELATED_DEPTH = 3
+
+
+@dataclass(frozen=True)
+class RelationshipPath:
+    """
+    Typed representation of a relationship traversal for `related()`.
+
+    Attributes:
+        hops: Tuple of InstrumentedAttribute describing the path.
+        loader_override: Optional loader hint for this path.
+    """
+
+    hops: Tuple[InstrumentedAttribute, ...]
+    loader_override: Optional[str] = None
+
+
+def path(*relationships: InstrumentedAttribute, loader: Optional[str] = None) -> RelationshipPath:
+    """
+    Build a typed multi-hop relationship path for `related()`.
+
+    Example:
+        path(User.posts, Post.comments, loader="selectin")
+
+    Args:
+        *relationships: One or more relationship attributes forming the traversal.
+        loader: Optional loader hint ("selectin" or "joined") applied to this path.
+    """
+    if not relationships:
+        raise ValueError("path() requires at least one relationship attribute.")
+    for rel in relationships:
+        if not hasattr(rel, "property") or not isinstance(rel.property, RelationshipProperty):
+            raise TypeError("path() accepts only SQLAlchemy relationship attributes.")
+    if loader not in {None, "selectin", "joined"}:
+        raise ValueError("loader must be None, 'selectin', or 'joined'.")
+    return RelationshipPath(tuple(relationships), loader)
 
 JSON_TYPES: Tuple[type, ...] = (SQLAlchemyJSON,)
 if JSONB is not None:
@@ -324,7 +361,8 @@ class QueryBuilder:
         self._model_cls = model_cls
         self.db = db
         self._statement = select(self._model_cls)
-        self._related_used = False
+        # Track related paths added to this query to deduplicate and detect conflicts.
+        self._related_paths: dict[Tuple[InstrumentedAttribute, ...], dict[str, Any]] = {}
 
     def where(self, *args: ClauseElement) -> "QueryBuilder[T]":
         """
@@ -388,52 +426,74 @@ class QueryBuilder:
 
     def related(
         self,
-        relationship_attr: InstrumentedAttribute,
+        relationship_attr: InstrumentedAttribute | RelationshipPath,
         *,
         where: Optional[Sequence[ClauseElement]] = None,
         aggregate: Optional[str] = None,
         having: Optional[Sequence[Callable[[Any], ClauseElement]]] = None,
         order_by: Optional[Sequence[str]] = None,
-        loader: str = "selectin",
+        loader: Optional[str] = None,
     ) -> "QueryBuilder[T]":
         """
         Configures eager loading and/or filtering based on a relationship.
+        One path per call; chain multiple `related()` calls for siblings.
 
         This is the primary tool for solving N+1 query problems and for
         filtering a model based on its related data.
 
         Args:
-            relationship_attr: The relationship attribute on the model (e.g., `User.posts`).
+            relationship_attr: The relationship attribute on the model (e.g., `User.posts`)
+                or a `path()` object for multi-hop relationships.
             where: A list of filter clauses to apply to the related model.
             aggregate: The aggregation mode. Can be "exists" (default), "all", or "count".
             having: A list of filter clauses to apply to the result of a "count" aggregate.
             order_by: A list of ordering clauses for a "count" aggregate.
-            loader: The eager loading strategy. Can be "selectin" (default) or "joined".
+            loader: Optional eager loading strategy override for this path.
+                When omitted, heuristics pick joined for scalar hops and selectin for collections.
 
         Returns:
             The `QueryBuilder` instance for further chaining.
         """
-        if self._related_used:
-            raise InvalidQueryError("related() can only be called once per query.")
-        path = self._resolve_relationship_path(relationship_attr)
+        hops, loader_override = self._normalize_path(relationship_attr, loader)
         agg = (aggregate or "exists").lower()
         where_clauses, having_clauses, order_clauses = map(
             self._ensure_sequence, (where, having, order_by)
         )
 
-        loader_choice = self._determine_loader(path, loader)
-        self._apply_eager_option(path, loader_choice)
+        path_key = tuple(hops)
+        existing = self._related_paths.get(path_key)
+        if existing:
+            # Reject conflicts on loader/aggregate/settings.
+            if (existing["aggregate"], existing["loader_override"]) != (agg, loader_override):
+                raise InvalidQueryError("Conflicting related() configuration for the same path.")
+            # Merge where/having/order_by if provided anew.
+            if where_clauses:
+                existing["where"].extend(where_clauses)
+            if having_clauses:
+                existing["having"].extend(having_clauses)
+            if order_clauses:
+                existing["order"].extend(order_clauses)
+            return self
+
+        loader_choice = self._determine_loader(hops, loader_override)
+        self._apply_eager_option(hops, loader_choice)
+
+        self._related_paths[path_key] = {
+            "aggregate": agg,
+            "where": list(where_clauses),
+            "having": list(having_clauses),
+            "order": list(order_clauses),
+            "loader_override": loader_override,
+        }
 
         if agg == "exists":
-            self._apply_exists(path, where_clauses)
+            self._apply_exists(hops, where_clauses)
         elif agg == "all":
-            self._apply_all(path, where_clauses)
+            self._apply_all(hops, where_clauses)
         elif agg == "count":
-            self._apply_count(path, where_clauses, having_clauses, order_clauses)
+            self._apply_count(hops, where_clauses, having_clauses, order_clauses)
         else:
             raise ValueError(f"Invalid aggregate option '{agg}'. Must be 'exists', 'all', or 'count'.")
-
-        self._related_used = True
         return self
 
     def alchemize(self) -> select:
@@ -511,6 +571,33 @@ class QueryBuilder:
             return []
         return list(value) if isinstance(value, (list, tuple)) else [value]
 
+    def _normalize_path(
+        self, rel_or_path: InstrumentedAttribute | RelationshipPath, loader_opt: Optional[str]
+    ) -> Tuple[List[InstrumentedAttribute], Optional[str]]:
+        if isinstance(rel_or_path, RelationshipPath):
+            hops = list(rel_or_path.hops)
+            loader_override = rel_or_path.loader_override if loader_opt is None else loader_opt
+        else:
+            hops = self._resolve_relationship_path(rel_or_path)
+            loader_override = loader_opt
+
+        if len(hops) > _MAX_RELATED_DEPTH:
+            raise InvalidQueryError(f"related() paths may not exceed depth {_MAX_RELATED_DEPTH}.")
+
+        if loader_override not in {None, "selectin", "joined"}:
+            raise ValueError("loader must be None, 'selectin', or 'joined'.")
+
+        # Validate hop chain
+        if hops[0].parent.class_ is not self._model_cls:
+            raise InvalidQueryError("related() paths must start from the root model.")
+        for idx in range(1, len(hops)):
+            prev = hops[idx - 1].property.entity.class_
+            curr_parent = hops[idx].parent.class_
+            if prev is not curr_parent:
+                raise InvalidQueryError("Each hop in path() must follow from the previous relationship.")
+
+        return hops, loader_override
+
     @staticmethod
     def _build_order_clause(clause: Any, agg_expr: Any) -> Any:
         if isinstance(clause, str):
@@ -520,25 +607,45 @@ class QueryBuilder:
             return agg_expr.desc() if clause.startswith("-") else agg_expr.asc()
         return clause(agg_expr) if callable(clause) else clause
 
-    def _determine_loader(self, path: List[InstrumentedAttribute], loader_opt: str) -> str:
-        if loader_opt not in {"selectin", "joined"}:
-            raise ValueError("Loader must be 'selectin' or 'joined'.")
-        # Use joinedload for one-to-one or many-to-one relationships.
-        return "joined" if not path[0].property.uselist and loader_opt == "selectin" else loader_opt
+    def _determine_loader(self, path: List[InstrumentedAttribute], loader_opt: Optional[str]) -> Optional[str]:
+        if loader_opt not in {None, "selectin", "joined"}:
+            raise ValueError("loader must be None, 'selectin', or 'joined'.")
+        # Explicit joined on deep collections can explode row counts; block unless single hop or scalar.
+        if loader_opt == "joined" and any(hop.property.uselist for hop in path) and len(path) > 1:
+            raise InvalidQueryError("joined loader on multi-hop collection paths is not allowed by default.")
+        if loader_opt == "selectin" and not path[0].property.uselist:
+            return "joined"
+        # Preserve None to allow per-hop heuristics in _apply_eager_option
+        return loader_opt
 
     def _apply_eager_option(self, path: List[InstrumentedAttribute], loader_type: str):
-        loader = selectinload if loader_type == "selectin" else joinedload
-        self._statement = self._statement.options(loader(*path))
+        """
+        Build a chained loader option per hop. Loader heuristics may be overridden
+        at the path level via loader_type.
+        """
+
+        def _loader_for_hop(hop: InstrumentedAttribute) -> Callable:
+            choice = loader_type if loader_type else ("joined" if not hop.property.uselist else "selectin")
+            return selectinload if choice == "selectin" else joinedload
+
+        option = None
+        for hop in path:
+            loader_fn = _loader_for_hop(hop)
+            option = loader_fn(hop) if option is None else option.selectinload(hop) if loader_fn is selectinload else option.joinedload(hop)
+        if option is not None:
+            self._statement = self._statement.options(option)
 
     def _apply_exists(self, path: List[InstrumentedAttribute], wheres: List[ClauseElement]):
         if not wheres:
             return
-        self._statement = self._statement.where(path[0].any(and_(*wheres)))
+        predicate = self._build_relationship_predicate(path, and_(*wheres))
+        self._statement = self._statement.where(predicate)
 
     def _apply_all(self, path: List[InstrumentedAttribute], wheres: List[ClauseElement]):
         if not wheres:
             raise ValueError("aggregate='all' requires at least one WHERE clause.")
-        self._statement = self._statement.where(~path[0].any(~and_(*wheres)))
+        failing = self._build_relationship_predicate(path, ~and_(*wheres))
+        self._statement = self._statement.where(~failing)
 
     def _apply_count(
         self,
@@ -547,15 +654,61 @@ class QueryBuilder:
         havings: List[Callable],
         orders: List[Any],
     ):
-        target_cls = path[0].property.entity.class_
-        pk_col = sa_inspect(target_cls).primary_key[0]
-
-        count_subquery = select(func.count(pk_col)).where(path[0].property.primaryjoin)
-        if wheres:
-            count_subquery = count_subquery.where(and_(*wheres))
-        count_expr = count_subquery.correlate(self._model_cls).scalar_subquery()
+        count_expr = self._build_count_expression(path, wheres)
 
         for clause in havings:
             self._statement = self._statement.where(clause(count_expr))
         for clause in orders:
             self._statement = self._statement.order_by(self._build_order_clause(clause, count_expr))
+
+    def _build_relationship_predicate(self, path: List[InstrumentedAttribute], terminal_clause: ClauseElement) -> ClauseElement:
+        """
+        Recursively build an any()/has() predicate that targets the terminal hop.
+        """
+        if not path:
+            raise ValueError("Path cannot be empty.")
+        current = path[0]
+        remaining = path[1:]
+        if not remaining:
+            if current.property.uselist:
+                return current.any(terminal_clause)
+            return current.has(terminal_clause)
+        inner = self._build_relationship_predicate(remaining, terminal_clause)
+        if current.property.uselist:
+            return current.any(inner)
+        return current.has(inner)
+
+    def _build_count_expression(self, path: List[InstrumentedAttribute], wheres: List[ClauseElement]):
+        """
+        Build a correlated COUNT subquery over the terminal entity of the path.
+        """
+        root_table = sa_inspect(self._model_cls).local_table
+
+        # Work with base tables (no aliases) to build a correlated subquery.
+        target_table = path[-1].property.entity.class_.__table__
+        from_clause = target_table
+        joins: List[Tuple[Any, ClauseElement]] = []
+
+        # Traverse path backwards to accumulate join targets/conditions.
+        current_table = target_table
+        for rel in reversed(path):
+            parent_table = rel.parent.class_.__table__
+            join_cond = rel.property.primaryjoin
+            joins.append((parent_table, join_cond))
+            current_table = parent_table
+
+        # The first join in the reversed traversal connects to the root table.
+        # Build the select with explicit joins.
+        count_stmt = select(func.count()).select_from(from_clause)
+        for table, cond in joins[:-1]:  # skip the last because it's the root table; handle correlation separately
+            count_stmt = count_stmt.join(table, cond)
+
+        # Correlate to the root by applying the final join condition against the outer table.
+        root_join_cond = joins[-1][1]
+        count_stmt = count_stmt.where(root_join_cond)
+
+        if wheres:
+            count_stmt = count_stmt.where(and_(*wheres))
+
+        count_stmt = count_stmt.correlate(self._model_cls)
+        return count_stmt.scalar_subquery()

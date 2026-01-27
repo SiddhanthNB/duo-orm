@@ -60,7 +60,7 @@ from .exceptions import (
     IntegrityError,
     ValidationError,
 )
-from .query import json, array
+from .query import json, array, path
 
 
 __all__ = [
@@ -111,4 +111,5 @@ __all__ = [
     "ValidationError",
     "json",
     "array",
+    "path",
 ]

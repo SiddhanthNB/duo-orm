@@ -8,7 +8,7 @@ import pytest
 import pytest_asyncio
 from sqlalchemy import ARRAY, DateTime, ForeignKey, JSON as SAJSON, String, Integer, Identity
 
-from duo_orm import Database, Mapped, array, json, mapped_column, relationship
+from duo_orm import Database, Mapped, array, json, mapped_column, relationship, path
 from duo_orm.exceptions import (
     MultipleObjectsFoundError,
     ObjectNotFoundError,
@@ -308,6 +308,77 @@ def test_related_joined_loader_single_query(sync_models):
     assert counter.select_count == 1
 
 
+def test_related_nested_selectin_query_counts(sync_models):
+    User, Post, db = sync_models
+
+    class Comment(db.Model):
+        __tablename__ = "comments_nest"
+        id: Mapped[int] = mapped_column(Integer, Identity(), primary_key=True)
+        post_id: Mapped[int] = mapped_column(ForeignKey(f"{Post.__tablename__}.id"), nullable=False)
+        body: Mapped[str] = mapped_column(String(255), nullable=False)
+        post = relationship(Post, backref="comments_nest")
+
+    db.metadata.create_all(db.sync_engine)
+    with db.transaction():
+        u = User(name="Nested", age=33)
+        u.save()
+        p = Post(title="p", author=u)
+        p.save()
+        Comment(post=p, body="c1").save()
+        Comment(post=p, body="c2").save()
+
+    with StatementCounter(db.sync_engine) as counter:
+        fetched = (
+            User.related(path(User.posts, Post.comments_nest), loader="selectin")
+            .order_by("id")
+            .all()
+        )
+
+    assert len(fetched) == 1
+    # Expect at most 3 selects: users, posts, comments
+    assert counter.select_count <= 3
+    assert counter.write_count == 0
+
+
+def test_related_chaining_with_path_and_aggregate(sync_models):
+    User, Post, db = sync_models
+
+    class Comment(db.Model):
+        __tablename__ = "comments_rel"
+        id: Mapped[int] = mapped_column(Integer, Identity(), primary_key=True)
+        post_id: Mapped[int] = mapped_column(ForeignKey(f"{Post.__tablename__}.id"), nullable=False)
+        body: Mapped[str] = mapped_column(String(255), nullable=False)
+        post = relationship(Post, backref="comments_rel_test")
+
+    db.metadata.create_all(db.sync_engine)
+
+    with db.transaction():
+        u1 = User(name="U1", age=30)
+        u2 = User(name="U2", age=31)
+        u1.save()
+        u2.save()
+        p1 = Post(title="p1", author=u1)
+        p2 = Post(title="p2", author=u2)
+        p1.save()
+        p2.save()
+        Comment(post=p1, body="c1").save()
+        Comment(post=p1, body="c2").save()
+
+    users = (
+        User.related(User.posts, loader="selectin")
+        .related(
+            path(User.posts, Post.comments_rel_test),
+            aggregate="count",
+            having=[lambda c: c >= 2],
+            loader="selectin",
+        )
+        .order_by("id")
+        .all()
+    )
+
+    assert [u.name for u in users] == ["U1"]
+
+
 def test_delete_cascades_to_children(sync_models):
     User, Post, db = sync_models
 
@@ -397,9 +468,9 @@ def test_array_helper_requires_array_column(sync_models):
 
 
 def test_related_cannot_be_chained(sync_models):
-    User, Post, _ = sync_models
-    with pytest.raises(InvalidQueryError):
-        User.related(User.posts).related(User.posts)
+    User, Post, db = sync_models
+    # Chaining multiple related() calls should be allowed and deduped.
+    User.related(User.posts).related(User.posts).all()
 
 
 def test_order_by_invalid_field_raises(sync_models):

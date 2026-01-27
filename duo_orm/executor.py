@@ -195,11 +195,11 @@ def _save(instance: Any) -> Union[None, Awaitable[None]]:
     """Handles saving (INSERT/UPDATE) a model instance."""
     def _sync(session):
         session.add(instance)
-        session.flush()
+        session.flush([instance])
 
     async def _async(session):
         session.add(instance)
-        await session.flush()
+        await session.flush([instance])
 
     return _run_with_session(
         instance=instance,
@@ -229,11 +229,11 @@ def _bulk_create(cls: Any, instances: Any) -> Union[None, Awaitable[None]]:
     """Handles bulk creating model instances."""
     def _sync(session):
         session.add_all(instances)
-        session.flush()
+        session.flush(instances)
 
     async def _async(session):
         session.add_all(instances)
-        await session.flush()
+        await session.flush(instances)
 
     return _run_with_session(
         cls=cls,

@@ -109,7 +109,7 @@ This pattern ensures that each API request is handled as an atomic transaction.
 - `db.connect()` eagerly initializes sync/async engines so misconfiguration surfaces early. It is optional; engines are still created lazily on first use.
 - `db.disconnect()` disposes any initialized engines (sync and async) and clears cached factories. It does not affect sessions opened through `db.transaction()`, `standalone_session()`, or `sync_standalone_session()` because those context managers already clean up after themselves. Use `disconnect()` when a script or CLI is finished and you want to release pools explicitly.
 
-## The Power User Escape Hatch: `standalone_session`
+## **The Power User Escape Hatch: `standalone_session`**
 
 What if you need complete, manual control over the session, perhaps for a very complex query or to use an advanced SQLAlchemy feature? For this, DuoORM provides `db.standalone_session()`.
 
@@ -131,6 +131,16 @@ async with db.standalone_session() as session:
     # await session.commit()
 ```
 This is an advanced feature and should only be used when the standard DuoORM patterns do not fit your needs.
+
+### When to use it
+- You need full SQLAlchemy Core/ORM control (bulk ops, vendor-specific pragmas, advanced query plans).
+- You’re mixing DuoORM with another abstraction that manages its own units of work.
+- You need to stream results or use server-side cursors outside DuoORM’s managed context.
+
+### Safety tips
+- You own commits/rollbacks; always wrap writes in try/except and commit/rollback explicitly.
+- Don’t mix a standalone session with `db.transaction()`-managed work in the same call stack unless you know the boundaries.
+- Ensure you close the session (the context manager does this); leaking sessions can exhaust pools.
 
 ## Summary
 

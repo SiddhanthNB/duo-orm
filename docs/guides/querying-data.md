@@ -128,6 +128,21 @@ By default, `.related()` uses a `selectinload` strategy, which is efficient for 
 user = await User.related("profile", loader="joined").first()
 ```
 
+### Nested relationships with `path()`
+
+For multi-hop eager loads, wrap the hop chain with `path(...)` and call `.related()` once per path. Chain multiple calls for siblings.
+
+```python
+from duo_orm import path
+
+# users -> posts -> comments (selectin on collections)
+users = (
+    await User.related(path(User.posts, Post.comments), loader="selectin")
+               .related(User.groups, loader="selectin")  # sibling path in a separate call
+               .all()
+)
+```
+
 ### Filtering on Relationships
 
 The `.related()` method can also be used to filter parent objects based on their relationships.
@@ -156,12 +171,20 @@ prolific_authors = await User.related(
     aggregate="count",
     having=[lambda count_expr: count_expr > 10]
 ).all()
+
+# Users whose posts have at least 2 public comments (nested path)
+engaged_authors = await User.related(
+    path(User.posts, Post.comments),
+    aggregate="count",
+    where=[Comment.is_public.is_(True)],
+    having=[lambda count_expr: count_expr >= 2],
+).all()
 ```
 
 !!! warning
-    The `.related()` method is very powerful but is intentionally limited to a single relationship hop at a time to keep the API simple and predictable. For more complex, multi-level joins, you can use the `.alchemize()` escape hatch.
+    Call `.related()` with exactly one relationship/path per call, and chain for siblings. Use `path()` for multi-hop eager loading. Aggregates and filters apply to the terminal hop of the path you pass in.
 
-## The Escape Hatch: `.alchemize()`
+## **The Escape Hatch: `.alchemize()`**
 
 If you need to build a query that is too complex for the fluent API, you can use `.alchemize()`. This method returns the underlying SQLAlchemy `Select` object, allowing you to use the full power of SQLAlchemy Core.
 
@@ -179,3 +202,16 @@ async with db.standalone_session() as session:
     results = (await session.execute(sa_stmt)).scalars().all()
 ```
 This gives you a path to advanced query patterns without leaving the DuoORM ecosystem.
+
+### When to reach for `.alchemize()`
+
+- You need complex joins or window functions not covered by `.related()`, `.where()`, or `.order_by()`.
+- You want to add vendor-specific SQL expressions or hints.
+- You need to combine DuoORM-built clauses with hand-written SQLAlchemy Core constructs.
+- You want to execute the resulting statement inside a fully manual session; see [`db.standalone_session()`](../sessions-and-transactions/#the-power-user-escape-hatch-standalone_session).
+
+### Safety tips
+
+- Keep the DuoORM-built base (`.alchemize()`) as your starting point so model metadata (e.g., column names, relationships) stays correct.
+- Always execute the compiled statement with a DuoORM-managed or standalone session so engines/sessions remain consistent.
+- Prefer `text()` only for literals you fully control; otherwise bind parameters to avoid SQL injection.

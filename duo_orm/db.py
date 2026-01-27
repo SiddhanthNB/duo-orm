@@ -47,7 +47,7 @@ _DIALECT_ALIASES = {
 }
 
 
-def _normalize_dialect(url_str: str, *, expected: Optional[str] = None) -> Tuple[URL, str]:
+def _normalize_dialect(url_str: str, *, expected: Optional[str] = None, context: Optional[str] = None) -> Tuple[URL, str]:
     """Parses a URL, normalizes the dialect, and optionally enforces an expected dialect."""
     try:
         parsed = make_url(url_str)
@@ -72,9 +72,10 @@ def _normalize_dialect(url_str: str, *, expected: Optional[str] = None) -> Tuple
                 f"Unknown dialect '{expected}'. Accepted values: {', '.join(sorted(_DRIVER_CONFIG))}."
             )
         if normalized_expected != base_dialect:
+            if context == "async":
+                raise ConfigurationError("async_url dialect must match the primary url dialect.")
             raise ConfigurationError(
-                f"Dialect mismatch: URL uses '{base_dialect}', but dialect='{expected}' was provided. "
-                "Use the same dialect in both places (without a driver suffix)."
+                f"Dialect mismatch: expected '{normalized_expected}', got '{base_dialect}'."
             )
 
     return parsed, base_dialect
@@ -82,16 +83,14 @@ def _normalize_dialect(url_str: str, *, expected: Optional[str] = None) -> Tuple
 
 def _resolve_urls(sync_url: str, async_url: Optional[str], derive_async: bool, *, dialect: Optional[str]) -> Tuple[str, Optional[str]]:
     """Resolves and reconstructs final sync and async URLs with correct drivers."""
-    parsed_sync, normalized = _normalize_dialect(sync_url, expected=dialect)
+    parsed_sync, normalized = _normalize_dialect(sync_url, expected=dialect, context="explicit")
     drivers = _DRIVER_CONFIG[normalized]
 
     resolved_sync_url = parsed_sync.set(drivername=drivers["sync"]).render_as_string(hide_password=False)
     resolved_async_url: str | None = None
 
     if async_url:
-        parsed_async, dialect_async = _normalize_dialect(async_url, expected=normalized)
-        if dialect_async != normalized:
-            raise ConfigurationError("async_url dialect must match the primary url dialect.")
+        parsed_async, dialect_async = _normalize_dialect(async_url, expected=normalized, context="async")
         resolved_async_url = parsed_async.set(drivername=drivers["async"]).render_as_string(hide_password=False)
     elif derive_async:
         if drivers["async"] == "sqlite+aiosqlite" and parsed_sync.database == ":memory:":
