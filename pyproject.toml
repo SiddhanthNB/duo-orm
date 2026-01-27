@@ -8,7 +8,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "duo-orm"
-version = "0.1.1"
+version = "0.1.2"
 authors = [
   { name="Siddhanth Bhimakari", email="siddhanth.n.b@gmail.com" },
 ]
