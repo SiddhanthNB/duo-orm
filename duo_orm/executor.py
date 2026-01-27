@@ -1,21 +1,23 @@
 # duo_orm/executor.py
 
-from sqlalchemy import func, select, literal
+from typing import Any, Awaitable, Callable, Union
+
+from sqlalchemy import func, literal, select
 from sqlalchemy import delete as sa_delete
 from sqlalchemy import update as sa_update
 
-from .exceptions import ObjectNotFoundError, MultipleObjectsFoundError
+from .exceptions import MultipleObjectsFoundError, ObjectNotFoundError
 from .session import active_session_var, is_async_context
 
 
-def _get_db_from_query(query_builder):
+def _get_db_from_query(query_builder: Any):
     """Internal helper to get the db object from a QueryBuilder."""
     if not hasattr(query_builder, "db") or not query_builder.db:
         raise RuntimeError("Database not configured for this query.")
     return query_builder.db
 
 
-def _get_db_from_instance(instance):
+def _get_db_from_instance(instance: Any):
     """Internal helper to get the db object from a model instance."""
     if not hasattr(instance.__class__, "_db") or not instance.__class__._db:
         raise RuntimeError(
@@ -25,7 +27,7 @@ def _get_db_from_instance(instance):
     return instance.__class__._db
 
 
-def _get_db_from_class(cls):
+def _get_db_from_class(cls: Any):
     """Internal helper to get the db object from a model class."""
     if not hasattr(cls, "_db") or not cls._db:
         raise RuntimeError(
@@ -34,7 +36,8 @@ def _get_db_from_class(cls):
         )
     return cls._db
 
-def _resolve_db_target(*, query_builder=None, instance=None, cls=None):
+def _resolve_db_target(*, query_builder: Any = None, instance: Any = None, cls: Any = None):
+    """Choose the correct Database provider based on the given context."""
     if query_builder is not None:
         return _get_db_from_query(query_builder)
     if instance is not None:
@@ -46,13 +49,13 @@ def _resolve_db_target(*, query_builder=None, instance=None, cls=None):
 
 def _run_with_session(
     *,
-    query_builder=None,
-    instance=None,
-    cls=None,
+    query_builder: Any = None,
+    instance: Any = None,
+    cls: Any = None,
     transactional: bool = False,
-    work_sync,
-    work_async,
-):
+    work_sync: Callable[[Any], Any],
+    work_async: Callable[[Any], Awaitable[Any]],
+) -> Union[Any, Awaitable[Any]]:
     active_session = active_session_var.get(None)
 
     if is_async_context():
@@ -82,7 +85,7 @@ def _run_with_session(
 
 # --- READ OPERATIONS ---
 
-def _first(query_builder):
+def _first(query_builder: Any) -> Union[Any, Awaitable[Any]]:
     """Handles fetching the first record."""
     stmt = query_builder._statement
 
@@ -100,7 +103,7 @@ def _first(query_builder):
         work_async=_async,
     )
 
-def _all(query_builder):
+def _all(query_builder: Any) -> Union[Any, Awaitable[Any]]:
     """Handles fetching all records."""
     stmt = query_builder._statement
 
@@ -118,7 +121,7 @@ def _all(query_builder):
         work_async=_async,
     )
 
-def _count(query_builder):
+def _count(query_builder: Any) -> Union[int, Awaitable[int]]:
     """Handles counting the number of records for a query."""
     count_stmt = func.count().select().select_from(query_builder._statement.alias("subquery"))
 
@@ -136,7 +139,7 @@ def _count(query_builder):
         work_async=_async,
     )
 
-def _one(query_builder):
+def _one(query_builder: Any) -> Union[Any, Awaitable[Any]]:
     """Fetches exactly one record, raising if zero or multiple are found."""
     stmt = query_builder._statement.limit(2)
 
@@ -165,7 +168,7 @@ def _one(query_builder):
         work_async=_async,
     )
 
-def _exists(query_builder):
+def _exists(query_builder: Any) -> Union[bool, Awaitable[bool]]:
     """Returns True if the query matches at least one record."""
     exists_expr = query_builder._statement.exists()
     # SQL Server (and some dialects) do not support `SELECT EXISTS (...)` directly.
@@ -188,7 +191,7 @@ def _exists(query_builder):
 
 # --- WRITE OPERATIONS (Refactored) ---
 
-def _save(instance):
+def _save(instance: Any) -> Union[None, Awaitable[None]]:
     """Handles saving (INSERT/UPDATE) a model instance."""
     def _sync(session):
         session.add(instance)
@@ -205,7 +208,7 @@ def _save(instance):
         work_async=_async,
     )
 
-def _delete_instance(instance):
+def _delete_instance(instance: Any) -> Union[None, Awaitable[None]]:
     """Handles deleting a model instance."""
     def _sync(session):
         session.delete(instance)
@@ -222,7 +225,7 @@ def _delete_instance(instance):
         work_async=_async,
     )
 
-def _bulk_create(cls, instances):
+def _bulk_create(cls: Any, instances: Any) -> Union[None, Awaitable[None]]:
     """Handles bulk creating model instances."""
     def _sync(session):
         session.add_all(instances)
@@ -239,7 +242,7 @@ def _bulk_create(cls, instances):
         work_async=_async,
     )
 
-def _update(query_builder, **values):
+def _update(query_builder: Any, **values: Any) -> Union[None, Awaitable[None]]:
     """Handles bulk updates for a query."""
     update_stmt = sa_update(query_builder._model_cls).values(**values)
     where_clause = query_builder._statement.whereclause
@@ -260,7 +263,7 @@ def _update(query_builder, **values):
         work_async=_async,
     )
 
-def _delete(query_builder):
+def _delete(query_builder: Any) -> Union[None, Awaitable[None]]:
     """Handles bulk deletes for a query."""
     delete_stmt = sa_delete(query_builder._model_cls)
     where_clause = query_builder._statement.whereclause

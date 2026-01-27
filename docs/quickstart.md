@@ -10,7 +10,7 @@ This guide walks through setup and the two core usage modes: standalone (default
 pip install duo-orm
 ```
 
-Use **driverless URLs** (e.g., `postgresql://...`, `sqlite:///...`); the ORM injects the right drivers.
+Use driverless URLs (e.g., `postgresql://...`, `sqlite:///...`); the ORM injects the right drivers. Optionally add `dialect="postgresql"` (or `mysql`, `mssql`, `oracle`, `sqlite`) to `Database(...)` if you want the URL validated against a declared dialect.
 
 ### Scaffold the project
 

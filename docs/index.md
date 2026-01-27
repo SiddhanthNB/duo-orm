@@ -60,7 +60,7 @@ user = User.where(User.name == "Ada").first()
 ```
 
 !!! tip "Use driverless URLs"
-    Provide only the base dialect in your URL (for example `postgresql://user:pass@host/db`, `sqlite:///./app.db`). Do not include driver suffixes like `+psycopg`; DuoORM injects the correct sync/async drivers for you.
+    Provide only the base dialect in your URL (for example `postgresql://user:pass@host/db`, `sqlite:///./app.db`). Do not include driver suffixes like `+psycopg`; DuoORM injects the correct sync/async drivers for you. If you want an extra guardrail, pass `dialect="postgresql"` (or `mysql`, `mssql`, `oracle`, `sqlite`) to `Database(...)` and it will error if the URL and declared dialect disagree.
 
 ### When to use transactions
 

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, TypeVar, Dict, Any, Iterable, Type
+from typing import TYPE_CHECKING, Any, Awaitable, Dict, Iterable, Optional, Tuple, Type, TypeVar
 
 from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.orm.exc import UnmappedInstanceError
@@ -37,7 +37,7 @@ class _DuoOrmMethods:
         return QueryBuilder(cls, db=cls._db)
 
     @classmethod
-    def where(cls: Type[T], *args) -> "QueryBuilder[T]":
+    def where(cls: Type[T], *args: Any) -> "QueryBuilder[T]":
         """
         Starts a query with a WHERE clause.
 
@@ -52,7 +52,7 @@ class _DuoOrmMethods:
         return cls._get_query_builder().where(*args)
 
     @classmethod
-    def all(cls: Type[T]):
+    def all(cls: Type[T]) -> list[T] | Awaitable[list[T]]:
         """
         Fetches all records for this model.
 
@@ -64,7 +64,7 @@ class _DuoOrmMethods:
         return cls._get_query_builder().all()
 
     @classmethod
-    def first(cls: Type[T]):
+    def first(cls: Type[T]) -> Optional[T] | Awaitable[Optional[T]]:
         """
         Fetches the first record for this model.
 
@@ -77,7 +77,7 @@ class _DuoOrmMethods:
         return cls._get_query_builder().first()
 
     @classmethod
-    def related(cls: Type[T], relationship_attr, **kwargs) -> "QueryBuilder[T]":
+    def related(cls: Type[T], relationship_attr, **kwargs: Dict[str, Any]) -> "QueryBuilder[T]":
         """
         Starts a query and configures eager loading for a relationship.
 
@@ -94,7 +94,7 @@ class _DuoOrmMethods:
         return cls._get_query_builder().related(relationship_attr, **kwargs)
 
     @classmethod
-    def order_by(cls: Type[T], *args, **kwargs) -> "QueryBuilder[T]":
+    def order_by(cls: Type[T], *args: str, **kwargs: Dict[str, Any]) -> "QueryBuilder[T]":
         """
         Starts a query with an ORDER BY clause.
 
@@ -107,7 +107,7 @@ class _DuoOrmMethods:
         return cls._get_query_builder().order_by(*args, **kwargs)
 
     @classmethod
-    def paginate(cls: Type[T], *args, **kwargs) -> "QueryBuilder[T]":
+    def paginate(cls: Type[T], *args: Any, **kwargs: Dict[str, Any]) -> "QueryBuilder[T]":
         """
         Starts a query with pagination (LIMIT/OFFSET) applied.
 
@@ -121,7 +121,7 @@ class _DuoOrmMethods:
         return cls._get_query_builder().paginate(*args, **kwargs)
 
     @classmethod
-    def bulk_create(cls: Type[T], instances: list[T]):
+    def bulk_create(cls: Type[T], instances: list[T]) -> None | Awaitable[None]:
         """
         Performs a bulk insert of multiple model instances in a single transaction.
 
@@ -140,7 +140,7 @@ class _DuoOrmMethods:
 
     # --- Instance-level Actions ---
 
-    def save(self: T):
+    def save(self: T) -> None | Awaitable[None]:
         """
         Saves the current instance to the database (INSERT for new, UPDATE for existing).
 
@@ -157,7 +157,7 @@ class _DuoOrmMethods:
         self._apply_timestamp_hooks(is_insert=is_insert)
         return _save(self)
 
-    def delete(self: T):
+    def delete(self: T) -> None | Awaitable[None]:
         """
         Deletes the current instance from the database.
 
@@ -168,7 +168,7 @@ class _DuoOrmMethods:
 
     # --- Developer Experience Helpers ---
 
-    def validate(self: T):
+    def validate(self: T) -> None:
         """
         Hook for subclasses to implement custom validation logic.
 
@@ -182,7 +182,7 @@ class _DuoOrmMethods:
         return None
 
     @classmethod
-    def fields(cls: Type[T]) -> tuple[str, ...]:
+    def fields(cls: Type[T]) -> Tuple[str, ...]:
         """
         Returns a tuple of all mapped column names for this model.
 
@@ -205,7 +205,7 @@ class _DuoOrmMethods:
         mapper = sa_inspect(self.__class__)
         return {col.key: getattr(self, col.key) for col in mapper.columns}
 
-    def _apply_timestamp_hooks(self: T, *, is_insert: bool):
+    def _apply_timestamp_hooks(self: T, *, is_insert: bool) -> None:
         """Applies `set_on` semantics based on column info."""
         now = _utcnow()
         mapper = sa_inspect(self.__class__)

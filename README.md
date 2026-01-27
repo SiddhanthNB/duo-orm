@@ -4,7 +4,7 @@
 [![Python versions](https://img.shields.io/pypi/pyversions/duo-orm.svg?cacheSeconds=300)](https://pypi.org/project/duo-orm/)
 [![Docs](https://img.shields.io/badge/docs-readthedocs-blue.svg)](https://duo-orm.readthedocs.io/)
 
-An opinionated ORM with symmetrical sync/async APIs, explicit unit-of-work control, and ready-to-use Alembic scaffolding. DuoORM manages drivers for you—use driverless URLs like `postgresql://...` or `sqlite:///app.db` and it wires up the correct sync/async engines under the hood (SQLAlchemy 2.x).
+An opinionated ORM with symmetrical sync/async APIs, explicit unit-of-work control, and ready-to-use Alembic scaffolding. DuoORM manages drivers for you: use driverless URLs like `postgresql://...` or `sqlite:///app.db` and it wires up the correct sync/async engines under the hood (SQLAlchemy 2.x).
 
 ## Highlights
 

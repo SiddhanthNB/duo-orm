@@ -4,15 +4,16 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import (
     TYPE_CHECKING,
-    Type,
-    TypeVar,
+    Any,
+    Awaitable,
+    Callable,
+    Iterable,
     List,
     Optional,
     Sequence,
-    Callable,
-    Any,
     Tuple,
-    Iterable,
+    Type,
+    TypeVar,
 )
 
 from sqlalchemy import (
@@ -40,7 +41,7 @@ except ImportError:  # pragma: no cover
     JSONB = None  # type: ignore[misc,assignment]
     PG_ARRAY = None  # type: ignore[misc,assignment]
 
-from .executor import _first, _all, _update, _delete, _count, _one, _exists
+from .executor import _all, _count, _delete, _exists, _first, _one, _update
 from .exceptions import InvalidQueryError
 
 if TYPE_CHECKING:
@@ -317,7 +318,7 @@ class QueryBuilder:
     DuoORM model (e.g., `User.where(...)`).
     """
 
-    def __init__(self, model_cls: Type[T], db: "Database"):
+    def __init__(self, model_cls: Type[T], db: "Database") -> None:
         if not db:
             raise RuntimeError("QueryBuilder must be initialized with a Database instance.")
         self._model_cls = model_cls
@@ -449,19 +450,19 @@ class QueryBuilder:
 
     # --- Terminal Methods ---
 
-    def first(self) -> Optional[T]:
+    def first(self) -> Optional[T] | Awaitable[Optional[T]]:
         """
         Executes the query and returns the first matching record or `None`.
         """
         return _first(self)
 
-    def all(self) -> List[T]:
+    def all(self) -> List[T] | Awaitable[List[T]]:
         """
         Executes the query and returns a list of all matching records.
         """
         return _all(self)
 
-    def one(self) -> T:
+    def one(self) -> T | Awaitable[T]:
         """
         Executes the query and returns exactly one record.
 
@@ -471,15 +472,15 @@ class QueryBuilder:
         """
         return _one(self)
 
-    def count(self) -> int:
+    def count(self) -> int | Awaitable[int]:
         """Executes the query and returns the total number of matching records."""
         return _count(self)
 
-    def exists(self) -> bool:
+    def exists(self) -> bool | Awaitable[bool]:
         """Executes the query and returns `True` if at least one record exists."""
         return _exists(self)
 
-    def update(self, **values) -> None:
+    def update(self, **values) -> None | Awaitable[None]:
         """
         Performs a bulk update on all records matched by the query.
 
@@ -487,7 +488,7 @@ class QueryBuilder:
         """
         return _update(self, **values)
 
-    def delete(self) -> None:
+    def delete(self) -> None | Awaitable[None]:
         """
         Performs a bulk delete on all records matched by the query.
 

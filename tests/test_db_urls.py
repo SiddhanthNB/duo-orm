@@ -35,3 +35,19 @@ def test_sync_engine_typeerror_hints(monkeypatch):
     with pytest.raises(ConfigurationError) as excinfo:
         _ = db.sync_engine
     assert "bad" in str(excinfo.value)
+
+
+def test_explicit_dialect_mismatch():
+    with pytest.raises(ConfigurationError, match="Dialect mismatch"):
+        Database("postgresql://user:pass@localhost/db", dialect="mysql")
+
+
+def test_explicit_dialect_alias_allowed():
+    # postgres alias should normalize to postgresql
+    db = Database("postgresql://user:pass@localhost/db", dialect="postgres")
+    assert db.sync_url.startswith("postgresql+psycopg://")
+
+
+def test_explicit_dialect_unknown_value():
+    with pytest.raises(ConfigurationError, match="Unknown dialect 'cockroach'"):
+        Database("postgresql://user:pass@localhost/db", dialect="cockroach")

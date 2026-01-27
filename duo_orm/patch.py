@@ -6,6 +6,8 @@ so callers can stick to a consistent, pythonic API without remembering SQL
 patterns.
 """
 
+from typing import Any
+
 from sqlalchemy.orm.attributes import InstrumentedAttribute
 from sqlalchemy.sql import sqltypes
 
@@ -23,7 +25,7 @@ def _assert_string_column(attr: InstrumentedAttribute, op_name: str) -> None:
         raise TypeError(f"{op_name}() is only available on string-like columns.")
 
 
-def contains(self: InstrumentedAttribute, value: str):
+def contains(self: InstrumentedAttribute, value: str) -> Any:
     """
     Case-sensitive substring match (wraps SQLAlchemy's contains for consistency).
     """
@@ -31,17 +33,17 @@ def contains(self: InstrumentedAttribute, value: str):
     return _SQLA_CONTAINS(self, value)
 
 
-def startswith(self: InstrumentedAttribute, prefix: str):
+def startswith(self: InstrumentedAttribute, prefix: str) -> Any:
     _assert_string_column(self, "startswith")
     return _SQLA_STARTSWITH(self, prefix)
 
 
-def endswith(self: InstrumentedAttribute, suffix: str):
+def endswith(self: InstrumentedAttribute, suffix: str) -> Any:
     _assert_string_column(self, "endswith")
     return _SQLA_ENDSWITH(self, suffix)
 
 
-def icontains(self: InstrumentedAttribute, value: str):
+def icontains(self: InstrumentedAttribute, value: str) -> Any:
     """
     Case-insensitive substring match (equivalent to ILIKE %value%).
     """
@@ -49,7 +51,7 @@ def icontains(self: InstrumentedAttribute, value: str):
     return self.ilike(f"%{value}%")
 
 
-def istartswith(self: InstrumentedAttribute, prefix: str):
+def istartswith(self: InstrumentedAttribute, prefix: str) -> Any:
     """
     Case-insensitive prefix match.
     """
@@ -57,7 +59,7 @@ def istartswith(self: InstrumentedAttribute, prefix: str):
     return self.ilike(f"{prefix}%")
 
 
-def iendswith(self: InstrumentedAttribute, suffix: str):
+def iendswith(self: InstrumentedAttribute, suffix: str) -> Any:
     """
     Case-insensitive suffix match.
     """

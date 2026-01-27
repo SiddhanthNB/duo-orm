@@ -2,11 +2,11 @@
 
 import importlib
 import importlib.resources
+import re
 import sys
 from importlib.util import module_from_spec, spec_from_file_location
-import re
 from pathlib import Path
-from typing import Any, Dict, Tuple, Optional
+from typing import Any, Dict, Optional, Tuple
 
 import toml
 from alembic.config import Config
@@ -31,7 +31,7 @@ def _get_project_root() -> Path:
     raise FileNotFoundError("Could not find project root (pyproject.toml).")
 
 
-def _normalize_dir(value: str | None) -> str:
+def _normalize_dir(value: Optional[str]) -> str:
     raw = (value or DEFAULT_ORM_DIR).strip()
     if not raw or raw == ".":
         raw = DEFAULT_ORM_DIR
@@ -85,7 +85,9 @@ def _resolve_layout(project_root: Path, relative_dir: str) -> Tuple[Path, Path, 
     return base_dir, migrations_dir, module_path
 
 
-def _get_config(found_root: Optional[Path] = None, override_dir: Optional[str] = None) -> Tuple[Path, Dict[str, Any]]:
+def _get_config(
+    found_root: Optional[Path] = None, override_dir: Optional[str] = None
+) -> Tuple[Path, Dict[str, Any]]:
     """
     Finds and parses the user's configuration from pyproject.toml, with optional
     overrides from CLI flags/env vars.
@@ -110,7 +112,7 @@ def _get_config(found_root: Optional[Path] = None, override_dir: Optional[str] =
     return root, orm_config
 
 
-def _persist_pyproject_config(project_root: Path, relative_dir: str, version_table: Optional[str] = None):
+def _persist_pyproject_config(project_root: Path, relative_dir: str, version_table: Optional[str] = None) -> None:
     pyproject_path = project_root / "pyproject.toml"
     data: Dict[str, Any] = {}
     if pyproject_path.exists():
@@ -128,7 +130,7 @@ def load_template(filename: str) -> str:
     return template_path.read_text()
 
 
-def _generate_files(base_dir: Path, module_path: str, db_object_name: str, version_table: str):
+def _generate_files(base_dir: Path, module_path: str, db_object_name: str, version_table: str) -> None:
     """Creates the directories and files for the migration environment."""
     migrations_dir = base_dir / "migrations"
     versions_dir = migrations_dir / "versions"

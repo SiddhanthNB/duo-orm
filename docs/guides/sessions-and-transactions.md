@@ -107,7 +107,7 @@ This pattern ensures that each API request is handled as an atomic transaction.
 ## Connecting and disconnecting engines
 
 - `db.connect()` eagerly initializes sync/async engines so misconfiguration surfaces early. It is optional; engines are still created lazily on first use.
-- `db.disconnect()` disposes any initialized engines (sync and async) and clears cached factories. It does not affect sessions opened through `db.transaction()`, `standalone_session()`, or `sync_standalone_session()`—those context managers already clean up after themselves. Use `disconnect()` when a script or CLI is finished and you want to release pools explicitly.
+- `db.disconnect()` disposes any initialized engines (sync and async) and clears cached factories. It does not affect sessions opened through `db.transaction()`, `standalone_session()`, or `sync_standalone_session()` because those context managers already clean up after themselves. Use `disconnect()` when a script or CLI is finished and you want to release pools explicitly.
 
 ## The Power User Escape Hatch: `standalone_session`
 

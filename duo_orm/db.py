@@ -1,11 +1,12 @@
 # duo_orm/db.py
 
-from contextlib import contextmanager, asynccontextmanager
+from contextlib import asynccontextmanager, contextmanager
+from typing import AsyncContextManager, AsyncGenerator, ContextManager, Generator, Optional, Tuple
 
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker, declarative_base
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-from sqlalchemy.engine import make_url, URL
+from sqlalchemy import MetaData, create_engine
+from sqlalchemy.engine import URL, Engine, make_url
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
+from sqlalchemy.orm import Session, declarative_base, sessionmaker
 
 from .session import active_session_var, is_async_context
 from .basemodel import _DuoOrmMethods
@@ -46,8 +47,8 @@ _DIALECT_ALIASES = {
 }
 
 
-def _normalize_dialect(url_str: str) -> tuple[URL, str]:
-    """Parses a URL and normalizes the dialect."""
+def _normalize_dialect(url_str: str, *, expected: Optional[str] = None) -> Tuple[URL, str]:
+    """Parses a URL, normalizes the dialect, and optionally enforces an expected dialect."""
     try:
         parsed = make_url(url_str)
     except Exception as e:
@@ -56,28 +57,40 @@ def _normalize_dialect(url_str: str) -> tuple[URL, str]:
     drivername = parsed.drivername or ""
     if "+" in drivername:
         raise ConfigurationError(
-            "Do not include a driver in the database URL. Provide only the base dialect "
-            "(e.g., 'postgresql://...'). Drivers are managed automatically."
+            f"Do not include a driver in the database URL (found '{drivername}'). "
+            "Provide only the base dialect (e.g., 'postgresql://...'). Drivers are managed automatically."
         )
 
     base_dialect = _DIALECT_ALIASES.get(drivername.lower())
     if not base_dialect or base_dialect not in _DRIVER_CONFIG:
         raise ConfigurationError(f"Unsupported or unknown dialect '{drivername}'.")
 
+    if expected:
+        normalized_expected = _DIALECT_ALIASES.get(expected.lower())
+        if normalized_expected is None:
+            raise ConfigurationError(
+                f"Unknown dialect '{expected}'. Accepted values: {', '.join(sorted(_DRIVER_CONFIG))}."
+            )
+        if normalized_expected != base_dialect:
+            raise ConfigurationError(
+                f"Dialect mismatch: URL uses '{base_dialect}', but dialect='{expected}' was provided. "
+                "Use the same dialect in both places (without a driver suffix)."
+            )
+
     return parsed, base_dialect
 
 
-def _resolve_urls(sync_url: str, async_url: str | None, derive_async: bool) -> tuple[str, str | None]:
+def _resolve_urls(sync_url: str, async_url: Optional[str], derive_async: bool, *, dialect: Optional[str]) -> Tuple[str, Optional[str]]:
     """Resolves and reconstructs final sync and async URLs with correct drivers."""
-    parsed_sync, dialect = _normalize_dialect(sync_url)
-    drivers = _DRIVER_CONFIG[dialect]
+    parsed_sync, normalized = _normalize_dialect(sync_url, expected=dialect)
+    drivers = _DRIVER_CONFIG[normalized]
 
     resolved_sync_url = parsed_sync.set(drivername=drivers["sync"]).render_as_string(hide_password=False)
     resolved_async_url: str | None = None
 
     if async_url:
-        parsed_async, dialect_async = _normalize_dialect(async_url)
-        if dialect_async != dialect:
+        parsed_async, dialect_async = _normalize_dialect(async_url, expected=normalized)
+        if dialect_async != normalized:
             raise ConfigurationError("async_url dialect must match the primary url dialect.")
         resolved_async_url = parsed_async.set(drivername=drivers["async"]).render_as_string(hide_password=False)
     elif derive_async:
@@ -109,18 +122,20 @@ class Database:
             If not provided, `derive_async` will attempt to create it.
         derive_async (bool): If `True` (default), an async URL is automatically
             derived from `db_url` by swapping the driver.
+        dialect (str, optional): Expected dialect name (e.g., "postgresql", "mysql").
+            If provided, it must match the dialect parsed from `db_url`; otherwise an error is raised.
     """
 
-    def __init__(self, db_url: str, *, async_url: str | None = None, derive_async: bool = True):
+    def __init__(self, db_url: str, *, async_url: Optional[str] = None, derive_async: bool = True, dialect: Optional[str] = None) -> None:
         if not db_url:
             raise ValueError("Database URL cannot be empty.")
 
-        self._sync_url, self._async_url = _resolve_urls(db_url, async_url, derive_async)
+        self._sync_url, self._async_url = _resolve_urls(db_url, async_url, derive_async, dialect=dialect)
         self._db_url = self._sync_url  # For backwards compatibility / default
-        self._sync_engine = None
-        self._async_engine = None
-        self._sync_session_factory = None
-        self._async_session_factory = None
+        self._sync_engine: Optional[Engine] = None
+        self._async_engine: Optional[AsyncEngine] = None
+        self._sync_session_factory: Optional[sessionmaker] = None
+        self._async_session_factory: Optional[sessionmaker] = None
         self._connected = False
 
         # Create a new, unique declarative base from SQLAlchemy.
@@ -158,17 +173,17 @@ class Database:
         return self._sync_url
 
     @property
-    def async_url(self) -> str | None:
+    def async_url(self) -> Optional[str]:
         """The fully-resolved asynchronous database URL, if configured."""
         return self._async_url
 
     @property
-    def metadata(self):
+    def metadata(self) -> MetaData:
         """The `MetaData` object associated with this database instance's models."""
         return self.Model.metadata
 
     @property
-    def sync_engine(self):
+    def sync_engine(self) -> Engine:
         """The underlying synchronous SQLAlchemy `Engine`."""
         if not self._sync_url:
             raise RuntimeError("Sync engine is not configured for this Database.")
@@ -180,7 +195,7 @@ class Database:
         return self._sync_engine
 
     @property
-    def async_engine(self):
+    def async_engine(self) -> AsyncEngine:
         """The underlying asynchronous SQLAlchemy `AsyncEngine`."""
         if not self._async_url:
             raise RuntimeError("Async engine is not configured for this Database.")
@@ -230,7 +245,7 @@ class Database:
             )
         return self._async_session_factory
 
-    def connect(self):
+    def connect(self) -> None:
         """
         Eagerly initialize engines to surface configuration errors early.
 
@@ -247,7 +262,7 @@ class Database:
         self._connected = True
 
     @contextmanager
-    def _sync_transaction_context(self):
+    def _sync_transaction_context(self) -> ContextManager[Session]:
         """Internal implementation of the sync transaction manager."""
         with self.sync_session_factory() as session:
             token = active_session_var.set(session)
@@ -261,7 +276,7 @@ class Database:
                 active_session_var.reset(token)
 
     @asynccontextmanager
-    async def _async_transaction_context(self):
+    async def _async_transaction_context(self) -> AsyncContextManager[AsyncSession]:
         """Internal implementation of the async transaction manager."""
         async with self.async_session_factory() as session:
             token = active_session_var.set(session)
@@ -274,7 +289,7 @@ class Database:
             finally:
                 active_session_var.reset(token)
 
-    def transaction(self):
+    def transaction(self) -> ContextManager[Session] | AsyncContextManager[AsyncSession]:
         """
         Provides a context-managed transactional scope for database operations.
 
@@ -294,7 +309,7 @@ class Database:
         return self._sync_transaction_context()
 
     @asynccontextmanager
-    async def standalone_session(self):
+    async def standalone_session(self) -> AsyncContextManager[AsyncSession]:
         """
         Provides a raw, unmanaged SQLAlchemy `AsyncSession`.
 
@@ -309,7 +324,7 @@ class Database:
             yield session
 
     @contextmanager
-    def sync_standalone_session(self):
+    def sync_standalone_session(self) -> ContextManager[Session]:
         """
         Provides a raw, unmanaged synchronous SQLAlchemy `Session`.
 
