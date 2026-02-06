@@ -7,6 +7,7 @@ from typing import Tuple
 import pytest
 import pytest_asyncio
 from sqlalchemy import ARRAY, DateTime, ForeignKey, JSON as SAJSON, String, Integer, Identity
+from sqlalchemy.exc import OperationalError, DatabaseError
 
 from duo_orm import Database, Mapped, array, json, mapped_column, relationship, path
 from duo_orm.exceptions import (
@@ -133,13 +134,13 @@ def test_bulk_create_update_and_delete(sync_models):
         User(name="u2", age=25),
         User(name="u3", age=30),
     ]
-    User.bulk_create(users)
+    User.create_bulk(users)
 
-    User.where(User.age >= 20).update(age=99)
+    User.where(User.age >= 20).update_bulk({"age": 99})
     refreshed = User.order_by("id").all()
     assert [u.age for u in refreshed] == [99, 99, 99]
 
-    User.where(User.age == 99).delete()
+    User.where(User.age == 99).delete_bulk()
     assert User.where(User.age == 99).count() == 0
 
 
@@ -151,7 +152,7 @@ def test_bulk_create_is_atomic_on_validation_error(sync_models):
         User(name="bad", age=-1),  # will raise
     ]
     with pytest.raises(ValidationError):
-        User.bulk_create(users)
+        User.create_bulk(users, with_hooks=True)
 
     assert User.where(User.name.in_(["good", "bad"])).count() == 0
 
@@ -178,7 +179,7 @@ def test_timestamp_hooks(sync_models):
 def test_order_by_and_paginate(sync_models):
     User, _, _ = sync_models
     users = [User(name=f"p{i}", age=i) for i in range(5)]
-    User.bulk_create(users)
+    User.create_bulk(users)
 
     ordered = User.order_by("-age").paginate(limit=2, offset=1).all()
     ages = [u.age for u in ordered]
@@ -222,7 +223,7 @@ def test_one_raises_for_missing_or_multiple(sync_models):
     with pytest.raises(ObjectNotFoundError):
         User.where(User.name == "nope").one()
 
-    User.bulk_create([User(name="dup", age=1), User(name="dup", age=2)])
+    User.create_bulk([User(name="dup", age=1), User(name="dup", age=2)])
     with pytest.raises(MultipleObjectsFoundError):
         User.where(User.name == "dup").one()
 
@@ -498,14 +499,18 @@ def test_json_helpers_on_supported_dialect(db_target):
     if db_target.is_async or not db_target.supports_json:
         pytest.skip(f"JSON helpers require PostgreSQL-style operators; got {db_target.dialect}.")
 
-    db = Database(db_target.url)
+    try:
+        db = Database(db_target.url)
 
-    class Doc(db.Model):
-        __tablename__ = "docs"
-        id: Mapped[int] = mapped_column(Integer, Identity(), primary_key=True)
-        profile: Mapped[dict] = mapped_column(SAJSON, nullable=False)
+        class Doc(db.Model):
+            __tablename__ = "docs"
+            id: Mapped[int] = mapped_column(Integer, Identity(), primary_key=True)
+            profile: Mapped[dict] = mapped_column(SAJSON, nullable=False)
 
-    db.metadata.create_all(db.sync_engine)
+        db.metadata.create_all(db.sync_engine)
+    except (OperationalError, DatabaseError, OSError) as exc:
+        pytest.skip(f"Cannot connect to DB '{db_target.url}': {exc}")
+
     try:
         Doc(profile={"flags": {"beta": True}, "tags": ["orm"], "quota": 2}).save()
         Doc(profile={"flags": {"beta": False}, "tags": ["other"], "quota": 0}).save()
@@ -532,6 +537,7 @@ def test_json_helpers_on_supported_dialect(db_target):
         assert not_equals == 1
     finally:
         db.metadata.drop_all(db.sync_engine)
+        db.disconnect()
 
 
 def test_array_helpers_on_supported_dialect(db_target):
@@ -550,7 +556,10 @@ def test_array_helpers_on_supported_dialect(db_target):
         id: Mapped[int] = mapped_column(Integer, Identity(), primary_key=True)
         tags: Mapped[list[str]] = mapped_column(PG_ARRAY(String), nullable=False)
 
-    db.metadata.create_all(db.sync_engine)
+    try:
+        db.metadata.create_all(db.sync_engine)
+    except (OperationalError, DatabaseError, OSError) as exc:
+        pytest.skip(f"Cannot connect to DB '{db_target.url}': {exc}")
     try:
         Item(tags=["python", "orm"]).save()
         Item(tags=["sql"]).save()
@@ -573,3 +582,4 @@ def test_array_helpers_on_supported_dialect(db_target):
         assert length_check == 2
     finally:
         db.metadata.drop_all(db.sync_engine)
+        db.disconnect()

@@ -40,8 +40,9 @@ except ImportError:  # pragma: no cover
     JSONB = None  # type: ignore[misc,assignment]
     PG_ARRAY = None  # type: ignore[misc,assignment]
 
-from .executor import _all, _count, _delete, _exists, _first, _one, _update
+from .executor import _all, _count, _delete_bulk, _exists, _first, _one, _update_bulk
 from .exceptions import InvalidQueryError
+from .session import active_session_var, is_async_context
 
 if TYPE_CHECKING:
     from .db import Database
@@ -541,20 +542,63 @@ class QueryBuilder:
         return _exists(self)
 
     def update(self, **values) -> None | Awaitable[None]:
+        raise InvalidQueryError("update() has been renamed to update_bulk(). Use update_bulk instead.")
+
+    def update_bulk(
+        self,
+        values: dict[str, Any],
+        *,
+        with_hooks: bool = False,
+        batch_size: int = 200,
+        require_filter: bool = True,
+    ) -> None | Awaitable[None]:
         """
         Performs a bulk update on all records matched by the query.
 
-        This is a terminal method and does not return any records.
+        Args:
+            values: mapping of columns to new values.
+            with_hooks: when True, loads instances and runs per-row validation/hooks.
+            batch_size: batch size for the hooked path.
+            require_filter: guard against accidental full-table updates.
         """
-        return _update(self, **values)
+        return _update_bulk(
+            self,
+            values,
+            with_hooks=with_hooks,
+            batch_size=batch_size,
+            require_filter=require_filter,
+        )
 
     def delete(self) -> None | Awaitable[None]:
+        raise InvalidQueryError("delete() has been renamed to delete_bulk(). Use delete_bulk instead.")
+
+    def delete_bulk(
+        self,
+        *,
+        with_hooks: bool = False,
+        batch_size: int = 200,
+        require_filter: bool = True,
+    ) -> None | Awaitable[None]:
         """
         Performs a bulk delete on all records matched by the query.
 
-        This is a terminal method and does not return any records.
+        Args:
+            with_hooks: when True, loads instances and runs per-row delete hooks.
+            batch_size: batch size for the hooked path.
+            require_filter: guard against accidental full-table deletes.
         """
-        return _delete(self)
+        return _delete_bulk(
+            self,
+            with_hooks=with_hooks,
+            batch_size=batch_size,
+            require_filter=require_filter,
+        )
+
+    def find_in_batches(self, *args, **kwargs):
+        raise InvalidQueryError("find_in_batches() has been replaced by iterate(batch=True).")
+
+    def find_each(self, *args, **kwargs):
+        raise InvalidQueryError("find_each() has been replaced by iterate().")
 
     # --- Internal helpers ---
 
@@ -606,6 +650,131 @@ class QueryBuilder:
                 raise ValueError("When using aggregate='count', order_by only supports 'count' or '-count'.")
             return agg_expr.desc() if clause.startswith("-") else agg_expr.asc()
         return clause(agg_expr) if callable(clause) else clause
+
+    def iterate(
+        self,
+        *,
+        batch_size: int = 200,
+        batch: bool = False,
+    ):
+        """
+        Streams results using batched queries. When `batch=False` (default), yields
+        one model at a time. When `batch=True`, yields lists of models.
+
+        If no explicit ORDER BY is present on the query, primary key ordering is applied
+        for deterministic paging.
+        """
+        if batch_size <= 0:
+            raise ValueError("batch_size must be positive.")
+
+        mapper = sa_inspect(self._model_cls)
+        pk_cols = list(mapper.primary_key)
+        if not pk_cols:
+            raise InvalidQueryError(f"{self._model_cls.__name__} has no primary key.")
+
+        base_stmt = self._statement
+        orig_limit_clause = getattr(base_stmt, "_limit_clause", None)
+        orig_offset_clause = getattr(base_stmt, "_offset_clause", None)
+        orig_limit_value = orig_limit_clause if orig_limit_clause is not None else None
+        orig_offset_value = orig_offset_clause if orig_offset_clause is not None else None
+        walked = 0
+        has_order = bool(getattr(base_stmt, "_order_by_clauses", None))
+        if not has_order:
+            base_stmt = base_stmt.order_by(*[col.asc() for col in pk_cols])
+
+        active_session = active_session_var.get(None)
+        db = self.db
+
+        def _sync_iter():
+            nonlocal walked
+            # If the original query already has LIMIT/OFFSET, fetch once respecting that slice.
+            if orig_limit_clause is not None or orig_offset_clause is not None:
+                if active_session is not None:
+                    session = active_session
+                    result = session.execute(base_stmt)
+                    rows = result.unique().scalars().all()
+                else:
+                    with db.sync_session_factory() as session:
+                        result = session.execute(base_stmt)
+                        rows = result.unique().scalars().all()
+                if batch:
+                    if rows:
+                        yield rows
+                else:
+                    for row in rows:
+                        yield row
+                return
+
+            offset = 0
+            while True:
+                effective_offset = offset
+                remaining = None
+                current_limit = batch_size if remaining is None else min(batch_size, remaining)
+                if active_session is not None:
+                    session = active_session
+                    result = session.execute(base_stmt.limit(current_limit).offset(effective_offset))
+                    rows = result.unique().scalars().all()
+                else:
+                    with db.sync_session_factory() as session:
+                        result = session.execute(base_stmt.limit(current_limit).offset(effective_offset))
+                        rows = result.unique().scalars().all()
+                if not rows:
+                    break
+                if batch:
+                    yield rows
+                else:
+                    for row in rows:
+                        yield row
+                walked += len(rows)
+                if len(rows) < current_limit:
+                    break
+                offset += batch_size
+
+        async def _async_iter():
+            nonlocal walked
+            if orig_limit_clause is not None or orig_offset_clause is not None:
+                if active_session is not None:
+                    session = active_session
+                    result = await session.execute(base_stmt)
+                    rows = result.unique().scalars().all()
+                else:
+                    async with db.async_session_factory() as session:
+                        result = await session.execute(base_stmt)
+                        rows = result.unique().scalars().all()
+                if batch:
+                    if rows:
+                        yield rows
+                else:
+                    for row in rows:
+                        yield row
+                return
+
+            offset = 0
+            while True:
+                effective_offset = offset
+                remaining = None
+                current_limit = batch_size if remaining is None else min(batch_size, remaining)
+                if active_session is not None:
+                    session = active_session
+                    result = await session.execute(base_stmt.limit(current_limit).offset(effective_offset))
+                    rows = result.unique().scalars().all()
+                else:
+                    async with db.async_session_factory() as session:
+                        result = await session.execute(base_stmt.limit(current_limit).offset(effective_offset))
+                        rows = result.unique().scalars().all()
+                if not rows:
+                    break
+                if batch:
+                    yield rows
+                else:
+                    for row in rows:
+                        yield row
+                walked += len(rows)
+                if len(rows) < current_limit:
+                    break
+                offset += batch_size
+
+        return _async_iter() if is_async_context() else _sync_iter()
 
     def _determine_loader(self, path: List[InstrumentedAttribute], loader_opt: Optional[str]) -> Optional[str]:
         if loader_opt not in {None, "selectin", "joined"}:

@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any, Awaitable, Dict, Iterable, Optional, Tuple, Type, TypeVar
+import asyncio
+from typing import TYPE_CHECKING, Any, Awaitable, Dict, Iterable, Optional, Sequence, Tuple, Type, TypeVar
 
 from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.orm.exc import UnmappedInstanceError
 
 from .query import QueryBuilder
-from .executor import _save, _delete_instance, _bulk_create
+from .executor import _save, _delete_instance, _create_bulk
 from .exceptions import ValidationError
 
 if TYPE_CHECKING:
@@ -62,6 +63,16 @@ class _DuoOrmMethods:
             A list of model instances (sync) or an awaitable that returns a list (async).
         """
         return cls._get_query_builder().all()
+
+    @classmethod
+    def count(cls: Type[T]) -> int | Awaitable[int]:
+        """
+        Counts all records for this model.
+
+        Returns:
+            The total row count (sync) or an awaitable resolving to the count (async).
+        """
+        return cls._get_query_builder().count()
 
     @classmethod
     def first(cls: Type[T]) -> Optional[T] | Awaitable[Optional[T]]:
@@ -121,22 +132,121 @@ class _DuoOrmMethods:
         return cls._get_query_builder().paginate(*args, **kwargs)
 
     @classmethod
-    def bulk_create(cls: Type[T], instances: list[T]) -> None | Awaitable[None]:
+    def iterate(cls: Type[T], *args: Any, **kwargs: Dict[str, Any]):
         """
-        Performs a bulk insert of multiple model instances in a single transaction.
-
-        This method first runs `.validate()` and applies timestamp hooks on all
-        instances before sending them to the database. If any instance fails
-
-        validation, the entire operation is aborted and nothing is saved.
+        Stream records (or batches) using QueryBuilder.iterate.
 
         Args:
-            instances: A list of new, unsaved model instances.
+            batch_size: size of each fetch batch (defaults to 200).
+            batch: when True, yields lists of models; when False, yields one model at a time.
         """
-        for instance in instances:
-            instance.validate()
-            instance._apply_timestamp_hooks(is_insert=True)
-        return _bulk_create(cls, instances)
+        return cls._get_query_builder().iterate(*args, **kwargs)
+
+    @classmethod
+    def update_bulk(
+        cls: Type[T],
+        values: Dict[str, Any],
+        *,
+        with_hooks: bool = False,
+        batch_size: int = 200,
+        require_filter: bool = True,
+    ) -> None | Awaitable[None]:
+        """Convenience wrapper for QueryBuilder.update_bulk on the whole table or filtered query."""
+        return cls.where().update_bulk(
+            values,
+            with_hooks=with_hooks,
+            batch_size=batch_size,
+            require_filter=require_filter,
+        )
+
+    @classmethod
+    def delete_bulk(
+        cls: Type[T],
+        *,
+        with_hooks: bool = False,
+        batch_size: int = 200,
+        require_filter: bool = True,
+    ) -> None | Awaitable[None]:
+        """Convenience wrapper for QueryBuilder.delete_bulk."""
+        return cls.where().delete_bulk(
+            with_hooks=with_hooks,
+            batch_size=batch_size,
+            require_filter=require_filter,
+        )
+
+    @classmethod
+    def get(cls: Type[T], *pk_values: Any, **pk_kwargs: Any) -> Optional[T] | Awaitable[Optional[T]]:
+        """
+        Fetch a single record by primary key. Supports positional args for single PK
+        or keyword args for composite keys (field names must match column keys).
+        Returns `None` when not found.
+        """
+        mapper = sa_inspect(cls)
+        pk_cols = list(mapper.primary_key)
+        if not pk_cols:
+            raise ValidationError(f"{cls.__name__} has no primary key defined.")
+
+        filters = []
+        if pk_kwargs:
+            if len(pk_kwargs) != len(pk_cols):
+                raise ValidationError("Number of primary key fields does not match model definition.")
+            for col in pk_cols:
+                if col.key not in pk_kwargs:
+                    raise ValidationError(f"Missing primary key component '{col.key}'.")
+                filters.append(col == pk_kwargs[col.key])
+        else:
+            if len(pk_cols) != 1:
+                raise ValidationError("Provide keyword arguments for composite primary keys.")
+            if len(pk_values) != 1:
+                raise ValidationError("Exactly one positional primary key value is required.")
+            filters.append(pk_cols[0] == pk_values[0])
+
+        return cls.where(*filters).first()
+
+    @classmethod
+    def create(cls: Type[T], data: Dict[str, Any] | T = None, **kwargs: Any) -> T | Awaitable[T]:
+        """
+        Convenience classmethod to build and persist a new instance in one call.
+        Accepts a dict or keyword args. Returns the saved instance.
+        """
+        if data is None:
+            data = {}
+        payload: Dict[str, Any]
+        if isinstance(data, cls):
+            instance: T = data
+        else:
+            payload = {**data} if isinstance(data, dict) else {}
+            payload.update(kwargs)
+            instance = cls(**payload)  # type: ignore[arg-type]
+
+        res = instance.save()
+        if asyncio.iscoroutine(res):
+            async def _awaited():
+                await res
+                return instance
+            return _awaited()
+        return instance
+
+    @classmethod
+    def create_bulk(
+        cls: Type[T],
+        rows: Sequence[Dict[str, Any] | T],
+        *,
+        with_hooks: bool = False,
+        batch_size: int = 200,
+        return_models: bool = False,
+    ) -> None | list[T] | Awaitable[None] | Awaitable[list[T]]:
+        """
+        Bulk insert records. By default skips per-row hooks/validation for speed.
+        Set `with_hooks=True` to run `validate()` and timestamp hooks on each row.
+        """
+        return _create_bulk(
+            cls,
+            rows,
+            with_hooks=with_hooks,
+            batch_size=batch_size,
+            return_models=return_models,
+        )
 
     # --- Instance-level Actions ---
 
@@ -157,6 +267,17 @@ class _DuoOrmMethods:
         self._apply_timestamp_hooks(is_insert=is_insert)
         return _save(self)
 
+    def update(self: T, data: Dict[str, Any] | None = None, **kwargs: Any) -> None | Awaitable[None]:
+        """
+        Apply changes to the instance and persist them (hooks/validation run).
+        """
+        if data:
+            for key, val in data.items():
+                setattr(self, key, val)
+        for key, val in kwargs.items():
+            setattr(self, key, val)
+        return self.save()
+
     def delete(self: T) -> None | Awaitable[None]:
         """
         Deletes the current instance from the database.
@@ -172,9 +293,9 @@ class _DuoOrmMethods:
         """
         Hook for subclasses to implement custom validation logic.
 
-        This method is called automatically before `.save()` and `.bulk_create()`.
-        To block persistence, implementations of this method should raise a
-        `ValidationError`.
+        This method is called automatically before `.save()` and `.create_bulk()`
+        (when `with_hooks=True`). To block persistence, implementations of this
+        method should raise a `ValidationError`.
 
         Raises:
             ValidationError: If the model's state is invalid.

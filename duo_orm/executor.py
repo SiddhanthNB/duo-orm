@@ -1,12 +1,13 @@
 # duo_orm/executor.py
 
-from typing import Any, Awaitable, Callable, Union
+from typing import Any, Awaitable, Callable, Iterable, List, Sequence, Union
 
 from sqlalchemy import func, literal, select
 from sqlalchemy import delete as sa_delete
 from sqlalchemy import update as sa_update
+from sqlalchemy import inspect as sa_inspect
 
-from .exceptions import MultipleObjectsFoundError, ObjectNotFoundError
+from .exceptions import MultipleObjectsFoundError, ObjectNotFoundError, InvalidQueryError
 from .session import active_session_var, is_async_context
 
 
@@ -225,15 +226,54 @@ def _delete_instance(instance: Any) -> Union[None, Awaitable[None]]:
         work_async=_async,
     )
 
-def _bulk_create(cls: Any, instances: Any) -> Union[None, Awaitable[None]]:
-    """Handles bulk creating model instances."""
+def _chunked(seq: Sequence[Any], size: int) -> Iterable[List[Any]]:
+    if size <= 0:
+        raise ValueError("batch_size must be positive.")
+    for idx in range(0, len(seq), size):
+        yield list(seq[idx : idx + size])
+
+
+def _prepare_instances_for_create(cls: Any, rows: Sequence[Any], with_hooks: bool) -> List[Any]:
+    instances: List[Any] = []
+    for row in rows:
+        instance = row if isinstance(row, cls) else cls(**row)
+        if with_hooks:
+            instance.validate()
+            instance._apply_timestamp_hooks(is_insert=True)
+        instances.append(instance)
+    return instances
+
+
+def _create_bulk(
+    cls: Any,
+    rows: Sequence[Any],
+    *,
+    with_hooks: bool,
+    batch_size: int,
+    return_models: bool,
+) -> Union[None, List[Any], Awaitable[None], Awaitable[List[Any]]]:
+    """Handles bulk creating model instances with optional hooks and batching."""
+    rows_list = list(rows)
+
     def _sync(session):
-        session.add_all(instances)
-        session.flush(instances)
+        collected: List[Any] = []
+        for batch in _chunked(rows_list, batch_size):
+            instances = _prepare_instances_for_create(cls, batch, with_hooks)
+            session.add_all(instances)
+            session.flush(instances)
+            if return_models:
+                collected.extend(instances)
+        return collected if return_models else None
 
     async def _async(session):
-        session.add_all(instances)
-        await session.flush(instances)
+        collected: List[Any] = []
+        for batch in _chunked(rows_list, batch_size):
+            instances = _prepare_instances_for_create(cls, batch, with_hooks)
+            session.add_all(instances)
+            await session.flush(instances)
+            if return_models:
+                collected.extend(instances)
+        return collected if return_models else None
 
     return _run_with_session(
         cls=cls,
@@ -242,19 +282,88 @@ def _bulk_create(cls: Any, instances: Any) -> Union[None, Awaitable[None]]:
         work_async=_async,
     )
 
-def _update(query_builder: Any, **values: Any) -> Union[None, Awaitable[None]]:
-    """Handles bulk updates for a query."""
-    update_stmt = sa_update(query_builder._model_cls).values(**values)
+
+def _update_bulk(
+    query_builder: Any,
+    values: dict[str, Any],
+    *,
+    with_hooks: bool,
+    batch_size: int,
+    require_filter: bool,
+) -> Union[None, Awaitable[None]]:
+    """Handles bulk updates for a query with optional per-row hooks."""
+    if batch_size <= 0:
+        raise ValueError("batch_size must be positive.")
     where_clause = query_builder._statement.whereclause
-    if where_clause is not None:
-        update_stmt = update_stmt.where(where_clause)
+    if require_filter and where_clause is None:
+        raise InvalidQueryError("update_bulk() requires a WHERE clause unless require_filter=False.")
+
+    if not with_hooks:
+        update_stmt = sa_update(query_builder._model_cls).values(**values)
+        if where_clause is not None:
+            update_stmt = update_stmt.where(where_clause)
+
+        def _sync(session):
+            session.execute(update_stmt)
+            session.flush()
+
+        async def _async(session):
+            await session.execute(update_stmt)
+            await session.flush()
+
+        return _run_with_session(
+            query_builder=query_builder,
+            transactional=True,
+            work_sync=_sync,
+            work_async=_async,
+        )
+
+    # with_hooks=True path: load in batches, apply per-instance updates/validation.
     def _sync(session):
-        session.execute(update_stmt)
-        session.flush()
+        offset = 0
+        mapper = sa_inspect(query_builder._model_cls)
+        pk_cols = mapper.primary_key
+        base_stmt = query_builder._statement
+        if not getattr(base_stmt, "_order_by_clauses", None):
+            base_stmt = base_stmt.order_by(*pk_cols)
+        while True:
+            batch_stmt = base_stmt.limit(batch_size).offset(offset)
+            result = session.execute(batch_stmt)
+            instances = result.unique().scalars().all()
+            if not instances:
+                break
+            for instance in instances:
+                for key, val in values.items():
+                    setattr(instance, key, val)
+                instance.validate()
+                instance._apply_timestamp_hooks(is_insert=False)
+            session.flush(instances)
+            if len(instances) < batch_size:
+                break
+            offset += batch_size
 
     async def _async(session):
-        await session.execute(update_stmt)
-        await session.flush()
+        offset = 0
+        mapper = sa_inspect(query_builder._model_cls)
+        pk_cols = mapper.primary_key
+        base_stmt = query_builder._statement
+        if not getattr(base_stmt, "_order_by_clauses", None):
+            base_stmt = base_stmt.order_by(*pk_cols)
+        while True:
+            batch_stmt = base_stmt.limit(batch_size).offset(offset)
+            result = await session.execute(batch_stmt)
+            instances = result.unique().scalars().all()
+            if not instances:
+                break
+            for instance in instances:
+                for key, val in values.items():
+                    setattr(instance, key, val)
+                instance.validate()
+                instance._apply_timestamp_hooks(is_insert=False)
+            await session.flush(instances)
+            if len(instances) < batch_size:
+                break
+            offset += batch_size
 
     return _run_with_session(
         query_builder=query_builder,
@@ -263,19 +372,76 @@ def _update(query_builder: Any, **values: Any) -> Union[None, Awaitable[None]]:
         work_async=_async,
     )
 
-def _delete(query_builder: Any) -> Union[None, Awaitable[None]]:
-    """Handles bulk deletes for a query."""
-    delete_stmt = sa_delete(query_builder._model_cls)
+
+def _delete_bulk(
+    query_builder: Any,
+    *,
+    with_hooks: bool,
+    batch_size: int,
+    require_filter: bool,
+) -> Union[None, Awaitable[None]]:
+    """Handles bulk deletes for a query with optional per-row hooks."""
+    if batch_size <= 0:
+        raise ValueError("batch_size must be positive.")
     where_clause = query_builder._statement.whereclause
-    if where_clause is not None:
-        delete_stmt = delete_stmt.where(where_clause)
+    if require_filter and where_clause is None:
+        raise InvalidQueryError("delete_bulk() requires a WHERE clause unless require_filter=False.")
+
+    if not with_hooks:
+        delete_stmt = sa_delete(query_builder._model_cls)
+        if where_clause is not None:
+            delete_stmt = delete_stmt.where(where_clause)
+
+        def _sync(session):
+            session.execute(delete_stmt)
+            session.flush()
+
+        async def _async(session):
+            await session.execute(delete_stmt)
+            await session.flush()
+
+        return _run_with_session(
+            query_builder=query_builder,
+            transactional=True,
+            work_sync=_sync,
+            work_async=_async,
+        )
+
     def _sync(session):
-        session.execute(delete_stmt)
-        session.flush()
+        mapper = sa_inspect(query_builder._model_cls)
+        pk_cols = mapper.primary_key
+        base_stmt = query_builder._statement
+        if not getattr(base_stmt, "_order_by_clauses", None):
+            base_stmt = base_stmt.order_by(*pk_cols)
+        while True:
+            batch_stmt = base_stmt.limit(batch_size)
+            result = session.execute(batch_stmt)
+            instances = result.unique().scalars().all()
+            if not instances:
+                break
+            for instance in instances:
+                session.delete(instance)
+            session.flush()
+            if len(instances) < batch_size:
+                break
 
     async def _async(session):
-        await session.execute(delete_stmt)
-        await session.flush()
+        mapper = sa_inspect(query_builder._model_cls)
+        pk_cols = mapper.primary_key
+        base_stmt = query_builder._statement
+        if not getattr(base_stmt, "_order_by_clauses", None):
+            base_stmt = base_stmt.order_by(*pk_cols)
+        while True:
+            batch_stmt = base_stmt.limit(batch_size)
+            result = await session.execute(batch_stmt)
+            instances = result.unique().scalars().all()
+            if not instances:
+                break
+            for instance in instances:
+                await session.delete(instance)  # type: ignore[attr-defined]
+            await session.flush()
+            if len(instances) < batch_size:
+                break
 
     return _run_with_session(
         query_builder=query_builder,

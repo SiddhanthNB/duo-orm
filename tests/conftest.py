@@ -219,20 +219,29 @@ def db(db_target, cli_schema):
     """Sync Database instance for tests."""
     if db_target.is_async:
         pytest.skip("Sync tests expect a synchronous driver URL.")
-    database = Database(db_target.url)
+    pool_opts = {"pool_size": 1, "max_overflow": 0, "pool_timeout": 5, "pool_pre_ping": True}
+    database = Database(db_target.url, engine_kwargs=pool_opts)
     try:
         with database.sync_engine.connect() as conn:
             conn.execute(text("SELECT 1"))
     except (OperationalError, DatabaseError, OSError) as exc:
         pytest.skip(f"Cannot connect to DB '{db_target.url}': {exc}")
-    return database
+    try:
+        yield database
+    finally:
+        database.disconnect()
 
 
 @pytest_asyncio.fixture
 async def async_db(db_target, cli_schema):
     """Async Database instance for tests."""
+    pool_opts = {"pool_size": 1, "max_overflow": 0, "pool_timeout": 5, "pool_pre_ping": True}
     try:
-        database = Database(db_target.url, derive_async=True)
+        database = Database(
+            db_target.url,
+            derive_async=True,
+            engine_kwargs=pool_opts,
+        )
     except ValueError as exc:
         pytest.skip(f"Async not available for this URL: {exc}")
     try:
@@ -240,7 +249,10 @@ async def async_db(db_target, cli_schema):
             conn.execute(text("SELECT 1"))
     except (OperationalError, DatabaseError, OSError) as exc:
         pytest.skip(f"Cannot connect to DB '{db_target.url}': {exc}")
-    return database
+    try:
+        yield database
+    finally:
+        database.disconnect()
 
 
 class StatementCounter:

@@ -14,9 +14,9 @@ def test_rejects_unknown_dialect():
         Database("foo://user:pass@localhost/db")
 
 
-def test_async_url_must_match_primary():
-    with pytest.raises(ConfigurationError, match="async_url dialect must match"):
-        Database("postgresql://user:pass@localhost/db", async_url="mysql://user:pass@localhost/db")
+def test_derive_async_url_matches_primary():
+    db = Database("postgresql://user:pass@localhost/db", derive_async=True)
+    assert db.async_url.startswith("postgresql+psycopg://")
 
 
 def test_async_engine_requires_url_when_not_derived():
