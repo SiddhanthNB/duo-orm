@@ -8,6 +8,7 @@ This guide walks through setup and the two core usage modes: standalone (default
 - **Transaction-driven**: Wrap work in `db.transaction()` to share one session across steps; needed for related writes, cascades, or multi-step flows.
 - **Sync vs async**: Same API; async is used when an event loop is running. Set `derive_async=False` if you only want sync engines.
 - **Payloads**: All helpers accept plain dicts; Pydantic is optional validation/serialization sugar.
+- **Escape hatch**: Call `.alchemize()` on any query to get the raw SQLAlchemy `Select` when you need advanced SQL (CTEs, window functions, hints). See [The Escape Hatch](../guides/escape-hatch.md).
 
 ## Troubleshooting / FAQ
 
@@ -243,3 +244,4 @@ See also:
 - Full CRUD coverage and examples: [CRUD API](../guides/crud-api.md)
 - Framework example: [Framework Integration](fastapi.md)
 - Deeper query patterns: [User Guides: Querying Data](../guides/querying-data.md)
+- Raw SQLAlchemy when you need it: [The Escape Hatch](../guides/escape-hatch.md)

@@ -91,6 +91,7 @@ nav:
     - 'guides/crud-api.md'
     - 'guides/querying-data.md'
     - 'guides/pydantic-integration.md'
+    - 'guides/escape-hatch.md'
     - 'guides/sessions-and-transactions.md'
     - 'guides/database-migrations.md'
     - 'guides/json-and-array-types.md'
