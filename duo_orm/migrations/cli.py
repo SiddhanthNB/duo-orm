@@ -52,7 +52,7 @@ def init(orm_dir):
         # A. Scaffold migrations environment
         if not migrations_dir.exists():
             _generate_files(base_dir, module_path, DB_OBJECT_NAME, config["version_table"])
-            click.secho(f"✅ Created migration environment at: {migrations_dir}", fg="green")
+            click.secho(f"Created migration environment at: {migrations_dir}", fg="green")
         else:
             click.secho(f"Migration environment at {migrations_dir} already exists. Skipping.", fg="yellow")
 
@@ -61,14 +61,20 @@ def init(orm_dir):
         if not db_file_path.exists():
             template = load_template("database.py.tpl")
             db_file_path.write_text(template)
-            click.secho(f"✅ Created database entrypoint at: {db_file_path}", fg="green")
+            click.secho(f"Created database entrypoint at: {db_file_path}", fg="green")
         else:
             click.secho(f"Database entrypoint at {db_file_path} already exists. Skipping.", fg="yellow")
 
         models_dir = db_file_path.parent / "models"
         models_dir.mkdir(exist_ok=True)
         (models_dir / "__init__.py").touch(exist_ok=True)
-        click.secho(f"✅ Ensured models directory exists at: {models_dir}", fg="green")
+        click.secho(f"Ensured models directory exists at: {models_dir}", fg="green")
+
+        # C. Scaffold schemas directory for Pydantic schemas (optional use).
+        schemas_dir = db_file_path.parent / "schemas"
+        schemas_dir.mkdir(exist_ok=True)
+        (schemas_dir / "__init__.py").touch(exist_ok=True)
+        click.secho(f"Ensured schemas directory exists at: {schemas_dir}", fg="green")
 
         # Persist the resolved directory so future commands can infer it without flags.
         _persist_pyproject_config(project_root, relative_dir, config.get("version_table"))
@@ -76,7 +82,8 @@ def init(orm_dir):
         click.secho("\nProject initialization complete!", fg="green")
         click.echo("Next steps:")
         click.echo(f"1. Define your models in the '{models_dir}' directory.")
-        click.echo("2. Run 'duo-orm migration create \"initial models\"' to create your first migration.")
+        click.echo(f"2. (Optional) Define your Pydantic schemas in '{schemas_dir}'.")
+        click.echo("3. Run 'duo-orm migration create \"initial models\"' to create your first migration.")
 
     except Exception as e:
         raise click.ClickException(f"Error during initialization: {e}")
@@ -103,7 +110,7 @@ def create(message, orm_dir):
     try:
         alembic_cfg = get_alembic_config(override_dir=orm_dir)
         command.revision(alembic_cfg, message=message, autogenerate=True)
-        click.secho("✅ New migration file created.", fg="green")
+        click.secho("New migration file created.", fg="green")
     except (CommandError, ConfigurationError) as e:
         raise click.ClickException(f"Error creating migration: {e}")
 
@@ -122,7 +129,7 @@ def upgrade(revision, orm_dir):
     try:
         alembic_cfg = get_alembic_config(override_dir=orm_dir)
         command.upgrade(alembic_cfg, revision)
-        click.secho("✅ Migrations applied successfully.", fg="green")
+        click.secho("Migrations applied successfully.", fg="green")
     except (CommandError, ConfigurationError) as e:
         raise click.ClickException(f"Error applying migrations: {e}")
 
@@ -143,7 +150,7 @@ def downgrade(ctx, revision, orm_dir):
     try:
         alembic_cfg = get_alembic_config(override_dir=orm_dir)
         command.downgrade(alembic_cfg, revision)
-        click.secho("✅ Migrations reverted successfully.", fg="green")
+        click.secho("Migrations reverted successfully.", fg="green")
     except (CommandError, ConfigurationError) as e:
         raise click.ClickException(f"Error reverting migrations: {e}")
 

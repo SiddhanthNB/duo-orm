@@ -41,6 +41,7 @@ except ImportError:  # pragma: no cover
     PG_ARRAY = None  # type: ignore[misc,assignment]
 
 from .executor import _all, _count, _delete_bulk, _exists, _first, _one, _update_bulk
+from ._payloads import coerce_payload as _coerce_payload
 from .exceptions import InvalidQueryError
 from .session import active_session_var, is_async_context
 
@@ -546,7 +547,7 @@ class QueryBuilder:
 
     def update_bulk(
         self,
-        values: dict[str, Any],
+        values: dict[str, Any] | Any,
         *,
         with_hooks: bool = False,
         batch_size: int = 200,
@@ -561,9 +562,10 @@ class QueryBuilder:
             batch_size: batch size for the hooked path.
             require_filter: guard against accidental full-table updates.
         """
+        normalized = _coerce_payload(values, partial=True, model_cls=self._model_cls)
         return _update_bulk(
             self,
-            values,
+            normalized,
             with_hooks=with_hooks,
             batch_size=batch_size,
             require_filter=require_filter,

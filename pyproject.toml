@@ -35,6 +35,7 @@ dependencies = [
     "click>=8.0",
     "toml>=0.10",
     "aiosqlite>=0.17",
+    "pydantic>=2.6,<3",
 ]
 
 [tool.setuptools.packages.find]

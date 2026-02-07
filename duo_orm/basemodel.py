@@ -9,6 +9,7 @@ from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.orm.exc import UnmappedInstanceError
 
 from .query import QueryBuilder
+from ._payloads import coerce_payload as _coerce_payload
 from .executor import _save, _delete_instance, _create_bulk
 from .exceptions import ValidationError
 
@@ -215,7 +216,7 @@ class _DuoOrmMethods:
         if isinstance(data, cls):
             instance: T = data
         else:
-            payload = {**data} if isinstance(data, dict) else {}
+            payload = _coerce_payload(data, partial=False, model_cls=cls)
             payload.update(kwargs)
             instance = cls(**payload)  # type: ignore[arg-type]
 
@@ -240,9 +241,16 @@ class _DuoOrmMethods:
         Bulk insert records. By default skips per-row hooks/validation for speed.
         Set `with_hooks=True` to run `validate()` and timestamp hooks on each row.
         """
+        normalized: list[Dict[str, Any] | T] = []
+        for row in rows:
+            if isinstance(row, cls):
+                normalized.append(row)
+            else:
+                normalized.append(_coerce_payload(row, partial=False, model_cls=cls))
+
         return _create_bulk(
             cls,
-            rows,
+            normalized,
             with_hooks=with_hooks,
             batch_size=batch_size,
             return_models=return_models,
@@ -271,12 +279,50 @@ class _DuoOrmMethods:
         """
         Apply changes to the instance and persist them (hooks/validation run).
         """
-        if data:
-            for key, val in data.items():
+        if data is not None:
+            payload = _coerce_payload(data, partial=True, model_cls=self.__class__)
+            for key, val in payload.items():
                 setattr(self, key, val)
         for key, val in kwargs.items():
             setattr(self, key, val)
         return self.save()
+
+    # --- Pydantic integration helpers ---
+
+    @classmethod
+    def from_schema(cls: Type[T], payload: Any) -> T:
+        """Build an **unsaved** instance from a Pydantic model or dict."""
+        data = _coerce_payload(payload, partial=False, model_cls=cls)
+        return cls(**data)  # type: ignore[arg-type]
+
+    def apply_schema(self: T, payload: Any) -> T:
+        """
+        Apply a Pydantic model or dict to this instance **without** saving.
+
+        Partial updates are supported; missing/None fields are ignored.
+        """
+        data = _coerce_payload(payload, partial=True, model_cls=self.__class__)
+        for key, val in data.items():
+            setattr(self, key, val)
+        return self
+
+    def to_schema(self: T, schema_cls: Any) -> Any:
+        """Serialize this instance into the provided Pydantic schema class."""
+        if not hasattr(schema_cls, "model_validate"):
+            raise ValidationError("Schema class must be a Pydantic BaseModel with model_validate().")
+        # Require from_attributes for safe ORM serialization
+        model_config = getattr(schema_cls, "model_config", None) or getattr(schema_cls, "Config", None)
+        from_attr = False
+        if isinstance(model_config, dict):
+            from_attr = model_config.get("from_attributes", False)
+        else:
+            from_attr = getattr(model_config, "from_attributes", False)
+        if not from_attr:
+            raise ValidationError("Schema class must set model_config.from_attributes = True for ORM export.")
+        try:
+            return schema_cls.model_validate(self, from_attributes=True)
+        except Exception as exc:  # pydantic.ValidationError or config issues
+            raise ValidationError(str(exc)) from exc
 
     def delete(self: T) -> None | Awaitable[None]:
         """
