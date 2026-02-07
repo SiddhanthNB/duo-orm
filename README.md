@@ -11,8 +11,10 @@ An opinionated ORM with symmetrical sync/async APIs, explicit unit-of-work contr
 - One API for sync *and* async (add `await` when needed).
 - Explicit unit of work: single-statement by default; opt into `db.transaction()` for shared sessions and cascades.
 - Driverless URLs; DuoORM injects the right sync/async driver per dialect.
+- CRUD helpers first: `save`, `create/create_bulk`, `update/update_bulk`, `delete/delete_bulk`, `iterate`, `get`, `count/exists`, `transaction`.
+- Pydantic built-in but optional: pass schemas to `create`/`update` or use `from_schema/apply_schema/to_schema`; plain dicts work everywhere.
 - Import common SQLAlchemy types and helpers directly from `duo_orm` (e.g., `String`, `JSON`, `PG_ARRAY`, `text`, `func`).
-- Built-in Alembic CLI scaffolding and migration commands.
+- Built-in Alembic CLI scaffolding and migration commands (now scaffolds `db/schemas/` alongside `db/models/`).
 - Tested across PostgreSQL, MySQL, MSSQL, Oracle, and SQLite (coverage matrix).
 
 ## Install
@@ -49,19 +51,38 @@ class User(db.Model):
     __tablename__ = "users"
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(100))
+    age: Mapped[int] = mapped_column()
 
-# One-shot (single statement/session)
-user = User.where(User.name == "Ada").first()
+# One-shot read (single statement/session)
+user = User.where(User.name == "Ada").first()  # or await in async contexts
 
 # Transactional work (shared session)
 async def create_user():
     async with db.transaction():
-        u = User(name="New")
+        u = User(name="New", age=30)
         await u.save()
+
+# Convenience CRUD helpers
+alice = User.create({"name": "Alice", "age": 25})           # sync create with dict
+count = User.where(User.age >= 18).count()                  # count
+async for batch in User.order_by("id").iterate(batch=True): # streaming in async
+    ...
+
+# Optional Pydantic (place in db/schemas/) for validated writes
+from pydantic import BaseModel
+class UserCreate(BaseModel):
+    name: str
+    age: int
+
+bob = await User.create(UserCreate(name="Bob", age=28))
 
 # When you're done (scripts/CLIs), optionally tear down engines
 db.disconnect()
 ```
+
+- Notes:
+  - Bulk helpers (`update_bulk`/`delete_bulk`) default to `require_filter=True` to guard against full-table writes; set to `False` only when intentional.
+  - If you set `Database(..., derive_async=False)`, only sync engines are created and async helpers will raise.
 
 ### Engine lifecycle helpers
 
@@ -70,9 +91,11 @@ db.disconnect()
 
 ## Documentation
 
-- Full docs & guides: https://duo-orm.readthedocs.io/
 - Quickstart: https://duo-orm.readthedocs.io/en/latest/quickstart/
-- API reference: https://duo-orm.readthedocs.io/en/latest/reference/
+- CRUD API: https://duo-orm.readthedocs.io/en/latest/guides/crud-api/
+- Framework example: https://duo-orm.readthedocs.io/en/latest/quickstart/fastapi/
+- Pydantic integration: https://duo-orm.readthedocs.io/en/latest/guides/pydantic-integration/
+- Full docs & guides: https://duo-orm.readthedocs.io/
 
 ## License
 
