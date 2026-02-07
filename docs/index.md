@@ -15,9 +15,15 @@
 
     ---
     SQLAlchemy Core base with Alembic scaffolding included, keeping queries and migrations together.
+
+- :material-shield-check:{ .lg .middle } **Pydantic built in**
+
+    ---
+    Pydantic ships by default: validate inputs, pass schemas to create/update, and serialize results to schemas with no extra wiring.
+
 </div>
 
-DuoORM is an opinionated yet straightforward ORM: you control when stateful work happens, you get symmetrical sync/async APIs, and you don’t manage drivers. Provide driverless URLs and the ORM injects the right sync/async drivers for you.
+DuoORM is an opinionated yet straightforward ORM: you control when stateful work happens, you get symmetrical sync/async APIs, and you don’t manage drivers. Provide driverless URLs and the ORM injects the right sync/async drivers for you. Pydantic ships in the box, so request/response schemas plug in directly.
 
 ## Why DuoORM
 
@@ -86,6 +92,7 @@ async def main():
 from fastapi import Depends, FastAPI
 from db.database import db
 from db.models import User
+from db.schemas import User as UserSchema
 
 app = FastAPI()
 
@@ -94,15 +101,13 @@ async def db_session():
         yield
 
 @app.post("/users")
-async def create_user(data: dict, _=Depends(db_session)):
-    user = User(**data)
-    await user.save()
-    return user.to_dict()
+async def create_user(data: UserSchema.Create, _=Depends(db_session)):
+    return await User.create(data)
 ```
 
 ## Project scaffold
 
-Use the CLI to create the recommended layout (database entrypoint, models package, migrations).
+Use the CLI to create the recommended layout (database entrypoint, models package, schemas package, migrations).
 
 ```bash
 duo-orm init
@@ -111,8 +116,9 @@ duo-orm init
 ## Next steps
 
 - Define models: [User Guides: Defining Models](guides/defining-models.md)
+- Wire schemas: [Pydantic Integration](guides/pydantic-integration.md)
 - Query data: [User Guides: Querying Data](guides/querying-data.md)
-- Full walkthrough: [Quickstart](quickstart.md)
+- Full walkthrough: [Quickstart](quickstart/index.md)
 
 ## Troubleshooting / FAQ
 

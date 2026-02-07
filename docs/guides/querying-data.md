@@ -92,8 +92,36 @@ A query is only sent to the database when you call one of these terminal methods
 - `.one()`: Returns **exactly one instance**. Raises `ObjectNotFoundError` if no object is found, or `MultipleObjectsFoundError` if more than one is found.
 - `.count()`: Returns the **integer count** of matching rows.
 - `.exists()`: Returns `True` if at least one row matches, `False` otherwise. This is more efficient than `.count() > 0`.
-- `.update(**values)`: Performs a bulk update on all matching rows. Does not return the records.
-- `.delete()`: Performs a bulk delete on all matching rows.
+- `.update_bulk(payload, with_hooks=False, batch_size=200, require_filter=True)`: Bulk update from a dict or Pydantic model. `with_hooks=True` loads rows in batches, runs `validate()` and timestamp hooks. The `require_filter` guard prevents table-wide updates unless you opt out explicitly.
+- `.delete_bulk(with_hooks=False, batch_size=200, require_filter=True)`: Bulk delete with the same guard/`with_hooks` semantics as updates.
+- `.iterate(batch_size=200, batch=False)`: Stream rows (or batches). When you haven’t set `order_by`, DuoORM auto-orders by primary key for deterministic paging. Use `paginate()` for classic page/offset slices; use `iterate()` for streaming or large result sets.
+
+## CRUD helpers (model and query side)
+
+- `Model.create(payload)` / `Model.create_bulk(payloads, return_models=False, with_hooks=False)`: High-level creates that accept Pydantic models or dicts; non-column keys are ignored. The bulk helper batches work and can run per-row hooks.
+- `instance.save()` / `instance.update(payload)` / `instance.delete()`: Instance-level persistence; `update` applies partial payloads (missing/`None` fields are skipped) then calls `save()`.
+- `Model.get(*pk, **pk_parts)`: Primary-key lookup; returns `None` when missing instead of raising.
+- `Query.update_bulk(...)` / `Query.delete_bulk(...)`: Query-scoped bulk actions (see signatures above). They reuse the active transaction/session when one is set.
+- `Query.count()` / `Query.exists()`: Cheap read-only checks; use `exists()` when you only need to know if at least one row matches.
+- `Query.iterate(...)` vs. `Query.paginate(...)`: `iterate` is cursor-like streaming with batching; `paginate` is page/offset slicing.
+
+You can call helpers directly on the model—no need to start with `where()` if you don’t need filters:
+
+```python
+# Create single + bulk
+u = await User.create({"name": "Solo", "age": 30})
+await User.create_bulk([{"name": "A"}, {"name": "B"}])
+
+# Primary key lookup
+maybe = await User.get(u.id)
+
+# Bulk update with guard
+await User.where(User.name.in_(["A", "B"])).update_bulk({"age": 99}, with_hooks=True)
+
+# Stream in batches of 100
+async for batch in User.order_by("id").iterate(batch=True, batch_size=100):
+    ...
+```
 
 ## Working with Relationships: `.related()`
 
@@ -208,7 +236,7 @@ This gives you a path to advanced query patterns without leaving the DuoORM ecos
 - You need complex joins or window functions not covered by `.related()`, `.where()`, or `.order_by()`.
 - You want to add vendor-specific SQL expressions or hints.
 - You need to combine DuoORM-built clauses with hand-written SQLAlchemy Core constructs.
-- You want to execute the resulting statement inside a fully manual session; see [`db.standalone_session()`](../sessions-and-transactions/#the-power-user-escape-hatch-standalone_session).
+- You want to execute the resulting statement inside a fully manual session; see [`db.standalone_session()`](sessions-and-transactions.md#the-power-user-escape-hatch-standalone_session).
 
 ### Safety tips
 

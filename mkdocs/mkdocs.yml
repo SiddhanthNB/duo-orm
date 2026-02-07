@@ -83,10 +83,14 @@ plugins:
 # Site Navigation
 nav:
   - 'Get Started': 'index.md'
-  - 'Quickstart': 'quickstart.md'
+  - 'Quickstart':
+    - 'Basics': 'quickstart/index.md'
+    - 'Framework Integration (FastAPI example)': 'quickstart/fastapi.md'
   - 'User Guides':
     - 'guides/defining-models.md'
+    - 'guides/crud-api.md'
     - 'guides/querying-data.md'
+    - 'guides/pydantic-integration.md'
     - 'guides/sessions-and-transactions.md'
     - 'guides/database-migrations.md'
     - 'guides/json-and-array-types.md'

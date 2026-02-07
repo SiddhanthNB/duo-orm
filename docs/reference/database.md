@@ -20,3 +20,6 @@ Each `Database` instance manufactures its own declarative base. Inherit all of y
         - disconnect
         - standalone_session
         - sync_standalone_session
+
+!!! note "Async engines are optional"
+    When you construct `Database(..., derive_async=False)`, only the synchronous URL/engine is created. Async helpers (including `db.async_engine`, `db.async_session_factory`, and any async model methods) will raise in that configuration.

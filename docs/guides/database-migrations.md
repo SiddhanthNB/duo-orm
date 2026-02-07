@@ -20,10 +20,11 @@ duo-orm init
 
 This command does several things:
 
-1.  **Creates a directory structure**: By default, it creates a `db/` directory with subdirectories for `models` and `migrations`.
+1.  **Creates a directory structure**: By default, it creates a `db/` directory with subdirectories for `models`, `schemas`, and `migrations` (each with `__init__.py` so you can import cleanly).
 2.  **Generates configuration**: It creates an `alembic.ini` and `env.py` file inside `db/migrations/` that are pre-configured to work with DuoORM.
 3.  **Creates a database entrypoint**: It generates a `db/database.py` file where you will configure your `Database` instance.
 4.  **Updates `pyproject.toml`**: It saves your configuration to your project's `pyproject.toml` file, so you don't have to specify it again.
+5.  **Points you to next steps**: Define ORM models in `db/models/` and matching Pydantic schemas in `db/schemas/` for request/response DTOs.
 
 ```toml title="pyproject.toml"
 [tool.duo-orm]

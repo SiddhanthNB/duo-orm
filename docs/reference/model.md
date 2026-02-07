@@ -13,14 +13,27 @@ The methods documented here are available on all your model classes (e.g., `User
         - where
         - all
         - first
+        - count
         - related
         - order_by
         - paginate
-        - bulk_create
+        - iterate
+        - get
+        - from_schema
+        - create
+        - create_bulk
+        - update_bulk
+        - delete_bulk
         # Instance-level methods
         - save
+        - update
         - delete
+        - apply_schema
+        - to_schema
         # Helper methods
         - validate
         - fields
         - to_dict
+
+!!! warning "Bulk safety guard"
+    `update_bulk` and `delete_bulk` default to `require_filter=True` to prevent accidental full-table writes. Set it to `False` only when you explicitly intend to touch every row.

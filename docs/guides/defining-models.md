@@ -98,9 +98,12 @@ class Order(db.Model):
 !!! warning
     These timestamp hooks are executed in Python code right before the `INSERT` or `UPDATE` statement is sent to the database. For this reason, they are not compatible with `server_default`. Use one or the other.
 
+!!! tip
+    Pydantic is optional. You can pass dicts to all CRUD helpers. If you want schema validation/serialization, see the [Pydantic Integration](pydantic-integration.md) guide.
+
 ## Model Validation
 
-You can enforce custom business logic by overriding the `.validate()` method on your model. This method is automatically called before any `.save()` or `.bulk_create()` operation.
+You can enforce custom business logic by overriding the `.validate()` method on your model. This method is automatically called before any `.save()` or `.create_bulk()` operation.
 
 If validation fails, raise a `ValidationError` from `duo_orm.exceptions`.
 
