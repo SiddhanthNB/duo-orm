@@ -56,6 +56,9 @@ for user in User.iterate(batch=False, batch_size=100):
 - `require_filter=True` → prevents accidental table-wide updates/deletes. Set to `False` only when you truly want to touch every row.
 - `batch_size` applies to hook-enabled paths and streaming; must be positive.
 
+!!! warning "with_hooks=True is slower"
+    Enabling `with_hooks=True` for bulk ops loads every matched row into memory to run hooks. This can be significantly slower and more memory intensive than the default set-based path. Use it only when you need per-row validation/timestamp logic and keep the matched set small.
+
 ## Quick reference
 
 | Task | Helper | Sync | Async |

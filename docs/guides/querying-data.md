@@ -96,6 +96,9 @@ A query is only sent to the database when you call one of these terminal methods
 - `.delete_bulk(with_hooks=False, batch_size=200, require_filter=True)`: Bulk delete with the same guard/`with_hooks` semantics as updates.
 - `.iterate(batch_size=200, batch=False)`: Stream rows (or batches). When you haven’t set `order_by`, DuoORM auto-orders by primary key for deterministic paging. Use `paginate()` for classic page/offset slices; use `iterate()` for streaming or large result sets.
 
+!!! warning "with_hooks=True trades speed for safety"
+    Setting `with_hooks=True` loads every matched row into memory to run `validate()` and timestamp hooks, which can be slow and memory-heavy (N+1-ish). Use it only when you truly need per-row hooks and keep the result set small.
+
 ## CRUD helpers (model and query side)
 
 - `Model.create(payload)` / `Model.create_bulk(payloads, return_models=False, with_hooks=False)`: High-level creates that accept Pydantic models or dicts; non-column keys are ignored. The bulk helper batches work and can run per-row hooks.
@@ -146,10 +149,13 @@ for user in users_with_posts:
 
 ### Loading Strategies
 
-By default, `.related()` uses a `selectinload` strategy, which is efficient for most cases. You can also choose a `joinedload` strategy.
+By default, DuoORM picks the loader for you: `selectin` for collection relationships, `joined` for scalars. You can override with `loader="selectin"` or `loader="joined"` when needed.
 
-- `loader="selectin"` (Default): Runs a second `SELECT` statement that fetches all related objects for all parent objects at once. Works well for one-to-many relationships.
-- `loader="joined"`: Uses a SQL `JOIN` to fetch parent and related objects in a single, potentially large query. This is often better for one-to-one relationships.
+- `loader="selectin"` (Default for collections): Runs a second `SELECT` that fetches all related objects for all parents at once. Good for one-to-many.
+- `loader="joined"` (Default for scalars): Uses a SQL `JOIN` to fetch parent and related objects together. Good for one-to-one or small result sets.
+
+!!! note "Safety guard on deep joined loads"
+    DuoORM blocks `loader="joined"` on deep, multi-hop collection paths (e.g., `path(User.posts, Post.comments)`) to prevent explosive row multiplication. Use `selectin` for those cases.
 
 ```python
 # Explicitly use a joined load for a user's profile (one-to-one)
@@ -209,8 +215,15 @@ engaged_authors = await User.related(
 ).all()
 ```
 
+!!! warning "Beware explosive joined loads"
+    Joined loading on wide or multi-hop collection paths can explode row counts. DuoORM blocks `loader="joined"` on deep collection paths and defaults to `selectin` for collections. Stick to the defaults unless you have measured a benefit.
+
 !!! warning
     Call `.related()` with exactly one relationship/path per call, and chain for siblings. Use `path()` for multi-hop eager loading. Aggregates and filters apply to the terminal hop of the path you pass in.
+
+## Querying JSON and ARRAY columns
+
+For structured columns, DuoORM exposes `json()` and `array()` helpers that plug into `.where(...)` just like any other expression. Use them to navigate JSON paths, cast values, or test array membership/overlap. See the dedicated guide: [JSON and ARRAY Types](json-and-array-types.md) for full examples.
 
 ## **The Escape Hatch: `.alchemize()`**
 
@@ -225,9 +238,10 @@ query_builder = User.where(User.age > 20)
 # Eject to raw SQLAlchemy for advanced features
 sa_stmt = query_builder.alchemize().where(text("name like 'A%'"))
 
-# Execute it with a standalone session
+# Execute it with a standalone session (you own commit/rollback)
 async with db.standalone_session() as session:
-    results = (await session.execute(sa_stmt)).scalars().all()
+    async with session.begin():
+        results = (await session.execute(sa_stmt)).scalars().all()
 ```
 This gives you a path to advanced query patterns without leaving the DuoORM ecosystem.
 

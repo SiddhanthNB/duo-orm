@@ -25,6 +25,7 @@ Every DuoORM query can “eject” to raw SQLAlchemy 2.0 by calling `.alchemize(
 
 ```python
 from duo_orm import func
+from db.database import db
 from db.models import Order
 
 # DuoORM side: readable filters and ordering
@@ -44,10 +45,37 @@ stmt = (
         .with_hint(Order.__table__, "INDEX(order_customer_idx)", dialect_name="mysql")
 )
 
-# Execute within a DuoORM-managed transaction
-async with Order._db.transaction():
-    rows = await Order._db.async_session_factory().execute(stmt)
-    top_customers = rows.scalars().all()
+# Execute with full SQLAlchemy control (standalone session)
+async with db.standalone_session() as session:
+    async with session.begin():
+        result = await session.execute(stmt)
+        top_customers = result.scalars().all()
+
+# Sync variant:
+# with db.sync_standalone_session() as session:
+#     with session.begin():
+#         result = session.execute(stmt)
+#         top_customers = result.scalars().all()
+
+```
+
+Choose your session:
+
+```python
+# Managed (reuse DuoORM transaction/session)
+async with db.transaction() as session:
+    result = await session.execute(stmt)
+    rows = result.scalars().all()
+
+# Unmanaged (full SQLAlchemy control)
+async with db.standalone_session() as session:
+    async with session.begin():
+        result = await session.execute(stmt)
+        rows = result.scalars().all()
+```
+
+- **Managed**: DuoORM handles commit/rollback and contextvars; good when you just need an advanced clause or two.
+- **Unmanaged**: You own commits and lifecycle; use when you want total control or to keep this work isolated from ORM-managed state.
 ```
 
 Use DuoORM for the fast path, and drop to raw SQLAlchemy the moment you need more. There’s no glass ceiling: `.alchemize()` keeps the full SQLAlchemy surface area one call away.

@@ -65,8 +65,14 @@ class User(db.Model):
 user = User.where(User.name == "Ada").first()
 ```
 
-!!! tip "Use driverless URLs"
-    Provide only the base dialect in your URL (for example `postgresql://user:pass@host/db`, `sqlite:///./app.db`). Do not include driver suffixes like `+psycopg`; DuoORM injects the correct sync/async drivers for you. If you want an extra guardrail, pass `dialect="postgresql"` (or `mysql`, `mssql`, `oracle`, `sqlite`) to `Database(...)` and it will error if the URL and declared dialect disagree.
+!!! tip "Use driverless URLs (load from env)"
+    Provide only the base dialect in your URL (for example `postgresql://app@host/db`, `sqlite:///./app.db`). Do not include driver suffixes like `+psycopg`; DuoORM injects the correct sync/async drivers for you. Prefer loading the URL from an environment variable, e.g.:
+    ```python
+    import os
+    from duo_orm import Database
+    db = Database(os.environ.get("DATABASE_URL", "sqlite:///./app.db"))
+    ```
+    If you want an extra guardrail, pass `dialect="postgresql"` (or `mysql`, `mssql`, `oracle`, `sqlite`) to `Database(...)` and it will error if the URL and declared dialect disagree.
 
 ### When to use transactions
 
@@ -119,6 +125,7 @@ duo-orm init
 - Wire schemas: [Pydantic Integration](guides/pydantic-integration.md)
 - Query data: [User Guides: Querying Data](guides/querying-data.md)
 - Full walkthrough: [Quickstart](quickstart/index.md)
+- Advanced recipes: [Cookbook](guides/cookbook.md)
 
 ## Troubleshooting / FAQ
 

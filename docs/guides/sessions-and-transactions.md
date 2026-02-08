@@ -142,6 +142,72 @@ This is an advanced feature and should only be used when the standard DuoORM pat
 - Don’t mix a standalone session with `db.transaction()`-managed work in the same call stack unless you know the boundaries.
 - Ensure you close the session (the context manager does this); leaking sessions can exhaust pools.
 
+## transaction() vs standalone_session(): who owns the boundary?
+
+- **Lifecycle & scope**
+
+  - `db.transaction()` opens a session/transaction for the block and closes it on exit.
+  - `db.standalone_session()` hands you a session; you choose when to `session.begin()`, `commit()`, or `rollback()`, and you can run multiple transactions on that one session.
+
+- **Safety defaults**
+
+  - `transaction()` is “safe by default”: atomicity and rollback-on-exception are handled.
+  - `standalone_session()` is “powerful by default”: you must manage transactions; forgetting to commit/rollback can hold locks.
+
+- **Typical use**
+
+  - Use `transaction()` for routine reads/writes and most app code.
+  - Use `standalone_session()` when you need multiple sequential or nested transactions on a single session, or when integrating with code that already manages transaction boundaries.
+
+- **Concurrency impact**
+
+  - `transaction()` keeps locks for the life of the block (short-lived by design).
+  - `standalone_session()` can stay open longer—only do this when you need fine-grained control.
+
+
+Parallel examples (same ORM calls; only ownership differs):
+
+```python
+# Managed
+with db.transaction():
+    user = User.create({"name": "Ada", "age": 30})
+    User.where(User.id == user.id).update_bulk({"age": 31})
+    posts = Post.where(Post.author == user).all()
+    # commit/rollback handled by the context manager
+
+# Unmanaged
+with db.standalone_session() as session:
+    with session.begin():  # you own the transaction
+        user = User.create({"name": "Ada", "age": 30})
+        User.where(User.id == user.id).update_bulk({"age": 31})
+        posts = Post.where(Post.author == user).all()
+    with session.begin():
+        User.where(User.id == user.id).delete_bulk(require_filter=False)
+    # you must ensure commits/rollbacks; the session stays open
+```
+
+## Visual cheat sheet
+
+```text
+Single call (default)
+  User.where(...).first()
+    -> DuoORM opens a session
+    -> executes one statement
+    -> commits (if write) / closes
+
+Transaction block
+  async with db.transaction():
+      ...multiple ORM calls...
+    -> one shared session for the block
+    -> commit on exit / rollback on error
+
+Standalone session (escape hatch)
+  async with db.standalone_session() as session:
+      session.execute(raw_stmt)
+    -> you own commit/rollback
+    -> full SQLAlchemy control
+```
+
 ## Summary
 
 | Context                        | Session Lifetime     | Commit Model                       | Typical Use Case                     |
