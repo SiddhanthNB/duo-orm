@@ -1,6 +1,6 @@
 # User Guides: Pydantic Integration
 
-Pydantic is a **core dependency** of DuoORM—no extra install flags are needed. It is an *optional layer* on top of the core CRUD API (`save`, `create`, `create_bulk`, `update`, `update_bulk`, `delete`, `delete_bulk`, `iterate`, etc.). Every helper accepts plain `dict` payloads; passing Pydantic models is a convenience that adds validation and field filtering.
+Pydantic is a **core dependency** of DuoORM. No extra install flags are needed. It is an *optional layer* on top of the core CRUD API (`save`, `create`, `create_bulk`, `update`, `update_bulk`, `delete`, `delete_bulk`, `iterate`, etc.). Every helper accepts plain `dict` payloads; passing Pydantic models is a convenience that adds validation and field filtering.
 
 For a full framework example, see [Quickstart: Framework Integration](../quickstart/fastapi.md).
 
@@ -23,9 +23,9 @@ Core CRUD helpers (`create`, `create_bulk`, `update`, `update_bulk`, `delete`, `
   ```
   Fix: set `model_config = ConfigDict(from_attributes=True)` (or `Config.from_attributes = True`).
 
-- **Non-column keys are ignored** — relationships/nested fields aren’t written by schema payloads; create related rows manually.
+- **Non-column keys are ignored** - relationships/nested fields aren’t written by schema payloads; create related rows manually.
 
-- **Explicit `None` in dict payloads** — dicts keep `None`; Pydantic payloads drop unset/`None` fields on partial updates.
+- **Explicit `None` in dict payloads** - dicts keep `None`; Pydantic payloads drop unset/`None` fields on partial updates.
 
 ## See also
 - Core CRUD methods: [CRUD API](crud-api.md)
@@ -35,6 +35,7 @@ Core CRUD helpers (`create`, `create_bulk`, `update`, `update_bulk`, `delete`, `
 ## Input rules and limits
 
 - Payloads can be **Pydantic models or dicts**. Anything that isn’t a mapped column is silently ignored (relationships/nested fields are skipped).
+- Pydantic defaults are now honored when creating from schemas, even if the input payload omits those fields.
 - Partial updates (`apply_schema`, `update_bulk` with schemas, `instance.update(schema)`) drop missing/`None` fields for Pydantic payloads (`exclude_unset` + `exclude_none`). When you pass a plain `dict`, any explicit `None` values are kept.
 - Pydantic validation runs before DuoORM writes. Serialization via `to_schema` raises a DuoORM `ValidationError` if the target schema lacks `from_attributes=True`.
 - No automatic nested writes yet; manage relationships manually (create/attach related rows yourself).

@@ -1,22 +1,22 @@
 # Get Started with DuoORM
 
 <div class="grid cards" markdown>
-- :material-database-search:{ .lg .middle } **Symmetrical API**
+- **Symmetrical API**
 
     ---
     One API for sync and async. Add `await` in async code and use the same calls in sync code.
 
-- :material-lightning-bolt:{ .lg .middle } **Opinionated & Simple**
+- **Opinionated & Simple**
 
     ---
     Default is single-statement, standalone calls. Use transactions when you need related graphs or cascades.
 
-- :material-rocket-launch:{ .lg .middle } **SQLAlchemy & Alembic ready**
+- **SQLAlchemy & Alembic ready**
 
     ---
     SQLAlchemy Core base with Alembic scaffolding included, keeping queries and migrations together.
 
-- :material-shield-check:{ .lg .middle } **Pydantic built in**
+- **Pydantic built in**
 
     ---
     Pydantic ships by default: validate inputs, pass schemas to create/update, and serialize results to schemas with no extra wiring.
@@ -60,6 +60,9 @@ class User(db.Model):
     __tablename__ = "users"
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str]
+
+# Quick demo setup (use migrations in real projects)
+db.create_all()
 
 # One-shot read (single statement/session)
 user = User.where(User.name == "Ada").first()

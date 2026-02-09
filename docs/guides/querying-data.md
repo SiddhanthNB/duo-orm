@@ -83,6 +83,9 @@ recent_users = await User.where(User.is_active == True).order_by("-created_at").
 paged_users = await User.order_by("id").paginate(limit=10, offset=10).all()
 ```
 
+!!! note "SQL Server requires ORDER BY for paginate"
+    SQL Server requires an explicit `ORDER BY` when using `OFFSET` and `FETCH`. If you call `paginate()` on SQL Server, include an `order_by(...)` first. This is a SQL Server and SQLAlchemy dialect requirement, not a DuoORM limitation.
+
 ## Executing Queries (Terminal Methods)
 
 A query is only sent to the database when you call one of these terminal methods. The same methods work in both sync and async contexts.
@@ -99,6 +102,9 @@ A query is only sent to the database when you call one of these terminal methods
 !!! warning "with_hooks=True trades speed for safety"
     Setting `with_hooks=True` loads every matched row into memory to run `validate()` and timestamp hooks, which can be slow and memory-heavy (N+1-ish). Use it only when you truly need per-row hooks and keep the result set small.
 
+!!! note "Iterate uses keyset pagination when possible"
+    If your query is ordered by primary key (or has no explicit `order_by`), `iterate()` automatically uses keyset/seek pagination under the hood. This is more robust under concurrent writes than offset-based paging. If you order by non-PK columns, `iterate()` falls back to limit/offset behavior.
+
 ## CRUD helpers (model and query side)
 
 - `Model.create(payload)` / `Model.create_bulk(payloads, return_models=False, with_hooks=False)`: High-level creates that accept Pydantic models or dicts; non-column keys are ignored. The bulk helper batches work and can run per-row hooks.
@@ -108,7 +114,10 @@ A query is only sent to the database when you call one of these terminal methods
 - `Query.count()` / `Query.exists()`: Cheap read-only checks; use `exists()` when you only need to know if at least one row matches.
 - `Query.iterate(...)` vs. `Query.paginate(...)`: `iterate` is cursor-like streaming with batching; `paginate` is page/offset slicing.
 
-You can call helpers directly on the model—no need to start with `where()` if you don’t need filters:
+!!! tip "Model.get is the fastest PK lookup in a transaction"
+    Inside `db.transaction()`, `Model.get(pk)` uses the session identity map and can return an already-loaded instance without hitting the database. Prefer it for primary-key lookups when you’re already in a transaction.
+
+You can call helpers directly on the model. No need to start with `where()` if you don’t need filters:
 
 ```python
 # Create single + bulk

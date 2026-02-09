@@ -162,7 +162,7 @@ This is an advanced feature and should only be used when the standard DuoORM pat
 - **Concurrency impact**
 
   - `transaction()` keeps locks for the life of the block (short-lived by design).
-  - `standalone_session()` can stay open longer—only do this when you need fine-grained control.
+  - `standalone_session()` can stay open longer; only do this when you need fine-grained control.
 
 
 Parallel examples (same ORM calls; only ownership differs):

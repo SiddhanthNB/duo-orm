@@ -23,6 +23,20 @@ If you're interested in contributing, here's how you can get started:
     # Example for SQLite
     pytest --db-url "sqlite:///./test.db"
     ```
+
+## Testing architecture (fixtures-first)
+
+The test suite is organized around fixtures in `tests/conftest.py` and a single shared model registry in `tests/models.py`.
+
+- `tests/models.py` defines the canonical test models and exposes `registry(db)` plus `schema_tables(...)`. Prefer adding new test models there instead of creating ad-hoc models inside tests.
+- `db_session` (sync) and `async_db_session` (async) fixtures provide a clean, isolated database state per test using a transaction + savepoint strategy.
+- `model_registry` gives you access to the shared models; `core_models` and `async_core_models` return common `(User, Post, db)` tuples for convenience.
+
+### Adding a new isolated test
+
+1. Add or extend models in `tests/models.py` if the test needs new tables.
+2. Use `db_session` or `async_db_session` to get an isolated database context.
+3. Fetch models via `model_registry` (or `core_models`/`async_core_models`) instead of re-defining them in the test.
 6.  **Submit a pull request** with a clear description of your changes.
 
 ## Areas for Contribution

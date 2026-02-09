@@ -18,6 +18,8 @@ Each `Database` instance manufactures its own declarative base. Inherit all of y
         - transaction
         - connect
         - disconnect
+        - create_all
+        - drop_all
         - standalone_session
         - sync_standalone_session
 

@@ -53,6 +53,40 @@ class Product(db.Model):
 
 DuoORM re-exports all of SQLAlchemy's standard types and constraints, so you can import them directly from `duo_orm`.
 
+## Dialect Notes (SQLAlchemy-level)
+
+These behaviors are imposed by SQLAlchemy dialects and the database itself, not DuoORM.
+
+- Oracle and UUID: SQLAlchemy's `UUID` type is not accepted by Oracle DDL. If you target Oracle, use a `String(36)` or `RAW(16)` style column and handle conversion in your app layer. Example: `id: Mapped[str] = mapped_column(String(36), primary_key=True)`.
+- Oracle auto-increment: For integer primary keys on Oracle, use `Identity()` with `Integer`. On other dialects, a plain integer primary key is sufficient. Example: `id: Mapped[int] = mapped_column(Integer, Identity(), primary_key=True)`.
+- JSON and ARRAY operators: The `json()` and `array()` helpers rely on PostgreSQL operator support. Other dialects do not implement the same operators. Example: `User.where(json(User.profile)["flags"]["beta"].is_true())` or `Article.where(array(Article.tags).includes("python"))`.
+
+## Security: Guarded Fields (Mass Assignment)
+
+When you pass payloads to helpers like `create`, `update`, `create_bulk`, or `update_bulk`, DuoORM protects sensitive columns with a simple guard list.
+
+- Add `__guarded__ = ["field1", "field2"]` to your model to block those fields from mass assignment.
+- Primary keys are always guarded for **updates**.
+- Guarded fields are **always** blocked, even on create.
+
+```python
+from duo_orm import Mapped, mapped_column, Boolean, String
+from ..database import db
+
+class User(db.Model):
+    __tablename__ = "users"
+    __guarded__ = ["role", "is_admin"]
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    email: Mapped[str] = mapped_column(String(255), unique=True)
+    role: Mapped[str] = mapped_column(String(50), default="user")
+    is_admin: Mapped[bool] = mapped_column(Boolean, default=False)
+
+# These payloads cannot overwrite guarded fields:
+# await User.create({"email": "a@x.com", "role": "admin"})
+# await user.update({"is_admin": True})
+```
+
 ## Automatic Timestamps
 
 DuoORM provides a declarative, Django-style way to automatically manage creation and update timestamps. You can add `info` flags to a `mapped_column` to control this behavior.

@@ -12,7 +12,7 @@ Many wrappers crumble when you need window functions, recursive CTEs, vendor hin
 
 ## The solution: `.alchemize()`
 
-Every DuoORM query can “eject” to raw SQLAlchemy 2.0 by calling `.alchemize()`. It returns the underlying `sqlalchemy.sql.Select` object immediately—no adapters, no translation layer. From there you use standard SQLAlchemy methods and expressions.
+Every DuoORM query can “eject” to raw SQLAlchemy 2.0 by calling `.alchemize()`. It returns the underlying `sqlalchemy.sql.Select` object immediately. No adapters, no translation layer. From there you use standard SQLAlchemy methods and expressions.
 
 ## Interoperability workflow
 

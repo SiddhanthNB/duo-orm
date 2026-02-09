@@ -12,10 +12,10 @@ This guide walks through setup and the two core usage modes: standalone (default
 
 ## Troubleshooting / FAQ
 
-- **“Do not include a driver in the URL”** — Use driverless URLs (`postgresql://...`, not `postgresql+psycopg://...`). DuoORM injects drivers automatically.
-- **Dialect mismatch** — If you pass `dialect=...`, it must match the URL’s dialect; otherwise a `ConfigurationError` is raised.
-- **Async-only errors** — If you created `Database(..., derive_async=False)`, async helpers (`await Model.create(...)`, `db.async_engine`) will raise; use sync calls instead.
-- **require_filter guard** — Bulk helpers default to `require_filter=True` to block table-wide writes. Set to `False` only when you intend to affect every row.
+- **“Do not include a driver in the URL”** - Use driverless URLs (`postgresql://...`, not `postgresql+psycopg://...`). DuoORM injects drivers automatically.
+- **Dialect mismatch** - If you pass `dialect=...`, it must match the URL’s dialect; otherwise a `ConfigurationError` is raised.
+- **Async-only errors** - If you created `Database(..., derive_async=False)`, async helpers (`await Model.create(...)`, `db.async_engine`) will raise; use sync calls instead.
+- **require_filter guard** - Bulk helpers default to `require_filter=True` to block table-wide writes. Set to `False` only when you intend to affect every row.
 
 ## Setup
 
@@ -77,6 +77,13 @@ db = Database("sqlite:///./test.db")  # driverless URL; drivers managed for you
 
 !!! note
     If you pass `derive_async=False`, DuoORM will not build an async URL/engine. You can still use the synchronous API, but any async calls (or `db.async_engine`) will raise.
+
+!!! tip "Fast demo setup"
+    For quick demos or tests (not production), you can create tables directly without migrations:
+    ```python
+    await db.create_all()  # async context
+    # or: db.create_all()  # sync context
+    ```
 
 ### Define models
 
@@ -173,6 +180,7 @@ from db.models import User
 from db.schemas import User as UserSchema
 
 async def main():
+    await db.create_all()  # quick demo setup; use migrations in real projects
     # Create from a Pydantic payload (validated) and save
     ada = await User.create(UserSchema.Create(email="ada@example.com", name="Ada", age=30))
     # One-shot read
@@ -223,6 +231,7 @@ from db.models import User
 from db.schemas import User as UserSchema
 
 def main():
+    db.create_all()  # quick demo setup; use migrations in real projects
     User.create(UserSchema.Create(email="sync@example.com", name="Syncy", age=45))  # standalone
     with db.transaction():             # shared session for the block
         User.create(UserSchema.Create(email="another@example.com", name="Another", age=50))
