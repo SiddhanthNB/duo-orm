@@ -1,7 +1,7 @@
 <p align="center">
-  <a href="https://duo-orm.readthedocs.io/">
-    <img src="docs/assets/logo.svg" width="200" alt="DuoORM Logo">
-  </a>
+<a href="https://duo-orm.readthedocs.io/">
+  <img src="https://raw.githubusercontent.com/SiddhanthNB/duo-orm/main/docs/assets/logo.svg" width="200" alt="DuoORM Logo">
+</a>
 </p>
 <p align="center">
     <a href="https://pypi.org/project/duo-orm/">
