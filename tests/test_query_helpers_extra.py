@@ -1,29 +1,21 @@
 from __future__ import annotations
 
 import pytest
-from sqlalchemy import ARRAY, Integer, String, JSON as SAJSON, Identity, ForeignKey
-from sqlalchemy.orm import relationship
 
-from duo_orm import Mapped, mapped_column, path
+from duo_orm import path
 from duo_orm.query import QueryBuilder, array, json
 from duo_orm.exceptions import InvalidQueryError
-from tests.test_orm_core import _build_models
 from tests.conftest import StatementCounter
 
 
-def test_json_expression_validation(db):
-    User, _ = _build_models(db)
+def test_json_expression_validation(model_registry):
+    User = model_registry.User
 
     with pytest.raises(TypeError):
         json(User.name)  # not a JSON column
 
-    class Doc(db.Model):
-        __tablename__ = "docs_qh"
-        id: Mapped[int] = mapped_column(primary_key=True)
-        payload: Mapped[dict] = mapped_column(SAJSON, nullable=False)
-        label: Mapped[str] = mapped_column(String(50), nullable=False)
-
-    expr = json(Doc.payload)
+    Doc = model_registry.JsonDoc
+    expr = json(Doc.profile)
     with pytest.raises(TypeError):
         expr[object()]  # invalid path key
     with pytest.raises(TypeError):
@@ -39,16 +31,12 @@ def test_json_expression_validation(db):
     _ = expr.as_text().expression(as_text=True)
 
 
-def test_array_expression_validation_and_values(db):
-    User, _ = _build_models(db)
+def test_array_expression_validation_and_values(model_registry):
+    User = model_registry.User
     with pytest.raises(TypeError):
         array(User.name)  # not an ARRAY column
 
-    class Bag(db.Model):
-        __tablename__ = "bags_qh"
-        id: Mapped[int] = mapped_column(primary_key=True)
-        tags: Mapped[list[int]] = mapped_column(ARRAY(Integer))
-
+    Bag = model_registry.BagInt
     expr = array(Bag.tags)
     with pytest.raises(ValueError):
         expr.includes_any(None)
@@ -58,8 +46,9 @@ def test_array_expression_validation_and_values(db):
         expr._prepare_values(None)
 
 
-def test_related_error_paths_and_loader(db):
-    User, Post = _build_models(db)
+def test_related_error_paths_and_loader(db, model_registry):
+    User = model_registry.User
+    Post = model_registry.Post
     qb = QueryBuilder(User, db=db)
 
     with pytest.raises(TypeError):
@@ -87,56 +76,42 @@ def test_related_error_paths_and_loader(db):
     assert qb_post._determine_loader(path, "selectin") == "joined"
 
 
-def test_related_conflict_on_same_path(db):
-    User, Post = _build_models(db)
+def test_related_conflict_on_same_path(db, model_registry):
+    User = model_registry.User
+    Post = model_registry.Post
     qb = QueryBuilder(User, db=db)
     qb.related(User.posts, loader="selectin")
     with pytest.raises(InvalidQueryError):
         qb.related(User.posts, loader="joined")
 
 
-def test_related_joined_blocked_on_deep_collection(db):
-    User, Post = _build_models(db)
+def test_related_joined_blocked_on_deep_collection(db, model_registry):
+    User = model_registry.User
+    Post = model_registry.Post
     qb = QueryBuilder(User, db=db)
     with pytest.raises(InvalidQueryError):
         qb.related(path(User.posts, Post.author), loader="joined")
 
 
-def test_related_chained_siblings_query_counts(db, db_target):
-    if db_target.is_async:
-        pytest.skip("Query count check uses sync engine.")
+def test_related_chained_siblings_query_counts(core_models, model_registry):
+    User, Post, db = core_models
+    Group = model_registry.GroupQH
 
-    User, Post = _build_models(db)
+    with db.transaction():
+        u = User(name="G", age=1)
+        u.save()
+        Post(title="p", author=u).save()
+        Group(user=u, name="g1").save()
 
-    class Group(db.Model):
-        __tablename__ = "groups_qh"
-        id: Mapped[int] = mapped_column(Integer, Identity(), primary_key=True)
-        user_id: Mapped[int] = mapped_column(ForeignKey(f"{User.__tablename__}.id"), nullable=False)
-        name: Mapped[str] = mapped_column(String(50), nullable=False)
-        user = relationship(User, back_populates="groups_qh")
+    with StatementCounter(db.sync_engine) as counter:
+        fetched = (
+            User.related(User.posts, loader="selectin")
+            .related(User.groups_qh, loader="selectin")  # sibling path
+            .order_by("id")
+            .all()
+        )
 
-    # Bind relationship attribute for root model
-    User.groups_qh = relationship(Group, back_populates="user")  # type: ignore[attr-defined]
-
-    db.metadata.create_all(db.sync_engine)
-    try:
-        with db.transaction():
-            u = User(name="G", age=1)
-            u.save()
-            Post(title="p", author=u).save()
-            Group(user=u, name="g1").save()
-
-        with StatementCounter(db.sync_engine) as counter:
-            fetched = (
-                User.related(User.posts, loader="selectin")
-                .related(User.groups_qh, loader="selectin")  # sibling path
-                .order_by("id")
-                .all()
-            )
-
-        assert fetched
-        # Expect: users + posts + groups -> up to 3 selects
-        assert counter.select_count <= 3
-        assert counter.write_count == 0
-    finally:
-        db.metadata.drop_all(db.sync_engine)
+    assert fetched
+    # Expect: users + posts + groups -> up to 3 selects
+    assert counter.select_count <= 3
+    assert counter.write_count == 0

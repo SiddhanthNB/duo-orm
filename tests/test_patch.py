@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import pytest
-from sqlalchemy import String, select, Integer, Identity
+from sqlalchemy import String, select
 
 from duo_orm import Database, Mapped, mapped_column
 
@@ -59,20 +59,13 @@ def test_patch_helpers_work_in_select():
     assert "LIKE" in compiled
 
 
-def test_string_helpers_reject_numeric_columns_in_db(db):
-    class Number(db.Model):
-        __tablename__ = "nums_patch"
-        id: Mapped[int] = mapped_column(Integer, Identity(), primary_key=True)
-        value: Mapped[int] = mapped_column(nullable=False)
+def test_string_helpers_reject_numeric_columns_in_db(db_session, model_registry):
+    Number = model_registry.Number
 
-    db.metadata.create_all(db.sync_engine)
-    try:
-        Number(value=1).save()
-        with pytest.raises(TypeError):
-            Number.where(Number.value.contains("x")).all()
-        with pytest.raises(TypeError):
-            Number.where(Number.value.startswith("1")).all()
-        with pytest.raises(TypeError):
-            Number.where(Number.value.endswith("1")).all()
-    finally:
-        db.metadata.drop_all(db.sync_engine)
+    Number(value=1).save()
+    with pytest.raises(TypeError):
+        Number.where(Number.value.contains("x")).all()
+    with pytest.raises(TypeError):
+        Number.where(Number.value.startswith("1")).all()
+    with pytest.raises(TypeError):
+        Number.where(Number.value.endswith("1")).all()

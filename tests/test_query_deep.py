@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import pytest
-from sqlalchemy import ARRAY, Integer, JSON as SAJSON, func
+from sqlalchemy import JSON as SAJSON, func
 
-from duo_orm import Mapped, mapped_column, array, json
+from duo_orm import array, json
 from duo_orm.exceptions import InvalidQueryError
 from duo_orm.query import (
     _is_json_column,
@@ -12,7 +12,6 @@ from duo_orm.query import (
     ArrayExpression,
     QueryBuilder,
 )
-from tests.test_orm_core import _build_models
 
 
 def test_internal_type_detectors():
@@ -25,13 +24,9 @@ def test_internal_type_detectors():
     assert _is_array_column(arr_dummy) is True
 
 
-def test_json_scalar_casts_and_astext(monkeypatch, db):
-    class Doc(db.Model):
-        __tablename__ = "docs_qd"
-        id: Mapped[int] = mapped_column(primary_key=True)
-        payload: Mapped[dict] = mapped_column(SAJSON, nullable=False)
-
-    expr = json(Doc.payload)
+def test_json_scalar_casts_and_astext(monkeypatch, model_registry):
+    Doc = model_registry.JsonDoc
+    expr = json(Doc.profile)
 
     # scalar casts cover integer/float/bool branches
     assert str(expr.equals(True))
@@ -49,12 +44,8 @@ def test_json_scalar_casts_and_astext(monkeypatch, db):
     assert str(expr._as_text(dummy_plain))
 
 
-def test_array_expression_branches(monkeypatch, db):
-    class Bag(db.Model):
-        __tablename__ = "bags_qd"
-        id: Mapped[int] = mapped_column(primary_key=True)
-        tags: Mapped[list[int]] = mapped_column(ARRAY(Integer))
-
+def test_array_expression_branches(monkeypatch, model_registry):
+    Bag = model_registry.BagInt
     expr = array(Bag.tags)
 
     # includes() when .any missing
@@ -91,8 +82,9 @@ def test_array_expression_branches(monkeypatch, db):
             delattr(func, "cardinality")
 
 
-def test_querybuilder_internal_paths(db):
-    User, Post = _build_models(db)
+def test_querybuilder_internal_paths(db, model_registry):
+    User = model_registry.User
+    Post = model_registry.Post
     qb = QueryBuilder(User, db=db)
 
     # order_by rejects falsy/invalid fields

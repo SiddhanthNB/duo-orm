@@ -3,25 +3,7 @@ from __future__ import annotations
 import concurrent.futures
 from typing import Iterable
 
-import pytest
-
-from duo_orm import Mapped, mapped_column
 from tests.conftest import StatementCounter
-from tests.test_orm_core import _build_models
-
-
-@pytest.fixture
-def concurrent_models(db, db_target):
-    if db_target.is_async:
-        pytest.skip("Concurrency stress tests use synchronous engines.")
-
-    User, Post = _build_models(db)
-    db.metadata.drop_all(db.sync_engine)
-    db.metadata.create_all(db.sync_engine)
-    try:
-        yield User, Post, db
-    finally:
-        db.metadata.drop_all(db.sync_engine)
 
 
 def _run_in_threads(func, payloads: Iterable[int], workers: int = 4):
@@ -29,8 +11,8 @@ def _run_in_threads(func, payloads: Iterable[int], workers: int = 4):
         list(executor.map(func, payloads))
 
 
-def test_parallel_writes_and_reads(concurrent_models):
-    User, Post, db = concurrent_models
+def test_parallel_writes_and_reads(core_models_clean):
+    User, Post, db = core_models_clean
 
     def writer(idx: int):
         with db.transaction():
@@ -49,8 +31,8 @@ def test_parallel_writes_and_reads(concurrent_models):
     assert counter.write_count == 0  # read-only queries after writes
 
 
-def test_concurrent_transactions_isolate_sessions(concurrent_models):
-    User, _, db = concurrent_models
+def test_concurrent_transactions_isolate_sessions(core_models_clean):
+    User, _, db = core_models_clean
 
     def create_batch(start: int):
         with db.transaction():

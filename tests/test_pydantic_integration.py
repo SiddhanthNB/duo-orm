@@ -1,10 +1,8 @@
 from __future__ import annotations
 
 import pytest
-import pytest_asyncio
 from pydantic import BaseModel, ConfigDict
 
-from tests.test_orm_core import _build_models
 from duo_orm.exceptions import ValidationError
 
 
@@ -26,30 +24,8 @@ class UserRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-@pytest.fixture
-def models(db):
-    User, Post = _build_models(db)
-    db.metadata.drop_all(db.sync_engine)
-    db.metadata.create_all(db.sync_engine)
-    try:
-        yield User, db
-    finally:
-        db.metadata.drop_all(db.sync_engine)
-
-
-@pytest_asyncio.fixture
-async def async_models(async_db):
-    User, Post = _build_models(async_db)
-    async_db.metadata.drop_all(async_db.sync_engine)
-    async_db.metadata.create_all(async_db.sync_engine)
-    try:
-        yield User, async_db
-    finally:
-        async_db.metadata.drop_all(async_db.sync_engine)
-
-
-def test_from_schema_and_to_schema(models):
-    User, _ = models
+def test_from_schema_and_to_schema(core_models):
+    User, _, _ = core_models
     payload = UserCreate(name="Ada", age=30)
     inst = User.from_schema(payload)
     assert inst.id is None
@@ -60,8 +36,8 @@ def test_from_schema_and_to_schema(models):
     assert dto.id == inst.id
 
 
-def test_apply_schema_partial(models):
-    User, _ = models
+def test_apply_schema_partial(core_models):
+    User, _, _ = core_models
     u = User.create({"name": "Bob", "age": 25})
     patch = UserUpdate(name="Bobby")
     u.apply_schema(patch)
@@ -70,8 +46,8 @@ def test_apply_schema_partial(models):
     u.save()
 
 
-def test_create_bulk_with_schemas(models):
-    User, _ = models
+def test_create_bulk_with_schemas(core_models):
+    User, _, _ = core_models
     rows = [
         UserCreate(name="C1", age=20),
         UserCreate(name="C2", age=21),
@@ -82,8 +58,8 @@ def test_create_bulk_with_schemas(models):
     assert names == ["C1", "C2"]
 
 
-def test_update_bulk_with_schema(models):
-    User, _ = models
+def test_update_bulk_with_schema(core_models):
+    User, _, _ = core_models
     User.create_bulk(
         [
             {"name": "D1", "age": 5},
@@ -95,8 +71,8 @@ def test_update_bulk_with_schema(models):
 
 
 @pytest.mark.asyncio
-async def test_async_create_and_update_with_schema(async_models):
-    User, _ = async_models
+async def test_async_create_and_update_with_schema(async_core_models):
+    User, _, _ = async_core_models
     payload = UserCreate(name="Eve", age=40)
     u = await User.create(payload)
     assert u.id is not None
@@ -105,8 +81,8 @@ async def test_async_create_and_update_with_schema(async_models):
     assert (await User.get(u.id)).name == "Evelyn"
 
 
-def test_to_schema_requires_from_attributes(models):
-    User, _ = models
+def test_to_schema_requires_from_attributes(core_models):
+    User, _, _ = core_models
 
     class Bad(BaseModel):
         id: int

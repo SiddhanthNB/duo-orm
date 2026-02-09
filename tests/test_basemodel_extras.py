@@ -1,46 +1,51 @@
 from __future__ import annotations
 
-from datetime import datetime
+def test_all_returns_rows(db_session, model_registry):
+    Thing = model_registry.Thing
 
-import pytest
-from sqlalchemy import DateTime, Integer, Identity
+    Thing().save()
+    rows = Thing.all()
+    assert len(rows) == 1
 
-from duo_orm import Mapped, mapped_column
+
+def test_first_returns_instance(db_session, model_registry):
+    Thing = model_registry.Thing
+
+    Thing().save()
+    first = Thing.first()
+    assert first is not None
 
 
-def test_basemodel_helpers_and_timestamps(db, db_target):
-    class Thing(db.Model):
-        __tablename__ = "things_extra"
-        id: Mapped[int] = mapped_column(Integer, Identity(), primary_key=True)
-        created: Mapped[datetime | None] = mapped_column(
-            DateTime(timezone=True), info={"set_on": "create"}, nullable=True
-        )
-        updated: Mapped[datetime | None] = mapped_column(
-            DateTime(timezone=True), info={"set_on": {"create", "update"}}, nullable=True
-        )
-        auto_now: Mapped[datetime | None] = mapped_column(
-            DateTime(timezone=True), info={"auto_now": True}, nullable=True
-        )
-        auto_add: Mapped[datetime | None] = mapped_column(
-            DateTime(timezone=True), info={"auto_now_add": True}, nullable=True
-        )
+def test_fields_includes_primary_key(db_session, model_registry):
+    Thing = model_registry.Thing
 
-    db.metadata.create_all(db.sync_engine)
-    try:
-        t = Thing()
-        t.save()
+    Thing().save()
+    fields = Thing.fields()
+    assert "id" in fields
 
-        assert Thing.all()
-        assert Thing.first() is not None
-        assert Thing.fields()
 
-        # Update path triggers update timestamp hooks
-        t.save()
+def test_timestamp_helpers_update(db_session, model_registry):
+    Thing = model_registry.Thing
 
-        # Paginate should still work
-        qb = Thing.paginate(10, 0)
-        if db_target.dialect == "mssql":
-            qb = qb.order_by("id")  # MSSQL requires ORDER BY for OFFSET/FETCH
-        assert qb.all()
-    finally:
-        db.metadata.drop_all(db.sync_engine)
+    t = Thing()
+    t.save()
+    created = t.created
+    updated = t.updated
+    auto_now = t.auto_now
+    auto_add = t.auto_add
+
+    t.save()
+    assert t.created == created
+    assert t.updated is not None and t.updated >= updated
+    assert t.auto_add == auto_add
+    assert t.auto_now is not None and t.auto_now >= auto_now
+
+
+def test_paginate_returns_results(db_session, db_target, model_registry):
+    Thing = model_registry.Thing
+
+    Thing().save()
+    qb = Thing.paginate(10, 0)
+    if db_target.dialect == "mssql":
+        qb = qb.order_by("id")  # MSSQL requires ORDER BY for OFFSET/FETCH
+    assert len(qb.all()) == 1

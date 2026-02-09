@@ -13,7 +13,14 @@ def _write_pyproject(root: Path, duo_orm_dir: str = "db"):
     (root / "pyproject.toml").write_text(toml.dumps({"tool": {"duo-orm": {"duo_orm_dir": duo_orm_dir}}}))
 
 
-def test_missing_db_object_raises_configuration_error(tmp_path, monkeypatch):
+@pytest.mark.parametrize(
+    "db_contents",
+    [
+        "# no db object here\n",
+        f"{DB_OBJECT_NAME} = 123\n",
+    ],
+)
+def test_invalid_db_object_raises_configuration_error(tmp_path, monkeypatch, db_contents):
     project = tmp_path / "proj"
     project.mkdir()
     _write_pyproject(project)
@@ -21,29 +28,12 @@ def test_missing_db_object_raises_configuration_error(tmp_path, monkeypatch):
     db_dir = project / "db"
     db_dir.mkdir()
     (db_dir / "__init__.py").write_text("")
-    (db_dir / "database.py").write_text("# no db object here\n")
+    (db_dir / "database.py").write_text(db_contents)
 
     monkeypatch.chdir(project)
     monkeypatch.syspath_prepend(str(project))
 
-    with pytest.raises(ConfigurationError):
-        get_alembic_config()
-
-
-def test_invalid_db_object_type_raises_configuration_error(tmp_path, monkeypatch):
-    project = tmp_path / "proj"
-    project.mkdir()
-    _write_pyproject(project)
-
-    db_dir = project / "db"
-    db_dir.mkdir()
-    (db_dir / "__init__.py").write_text("")
-    (db_dir / "database.py").write_text(f"{DB_OBJECT_NAME} = 123\n")
-
-    monkeypatch.chdir(project)
-    monkeypatch.syspath_prepend(str(project))
-
-    with pytest.raises(ConfigurationError):
+    with pytest.raises(ConfigurationError, match="Could not import Database instance"):
         get_alembic_config()
 
 

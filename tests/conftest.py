@@ -1,5 +1,4 @@
 import os
-import asyncio
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Tuple
@@ -11,9 +10,12 @@ import textwrap
 from sqlalchemy import event, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import NoSuchModuleError
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import sessionmaker
 
 from duo_orm import Database
 from duo_orm.db import _DIALECT_ALIASES
+from tests import models as test_models
 from sqlalchemy.exc import OperationalError, DatabaseError
 
 
@@ -42,6 +44,12 @@ class DbTarget:
     @property
     def label(self) -> str:
         return self.dialect
+
+
+@dataclass(frozen=True)
+class SchemaState:
+    registry: test_models.ModelRegistry
+    tables: list
 
 
 def _write(path: Path, content: str):
@@ -214,7 +222,7 @@ def cli_schema(tmp_path_factory, db_target):
     _teardown()
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def db(db_target, cli_schema):
     """Sync Database instance for tests."""
     if db_target.is_async:
@@ -253,6 +261,124 @@ async def async_db(db_target, cli_schema):
         yield database
     finally:
         database.disconnect()
+
+
+@pytest.fixture(scope="session")
+def db_schema(db, db_target) -> SchemaState:
+    registry = test_models.registry(db)
+    tables = test_models.schema_tables(db, db_target, registry)
+    if tables:
+        if db_target.dialect == "oracle":
+            db.metadata.drop_all(db.sync_engine, tables=tables, checkfirst=True)
+        db.metadata.create_all(db.sync_engine, tables=tables)
+    return SchemaState(registry=registry, tables=tables)
+
+
+def _wipe_tables(db, tables) -> None:
+    if not tables:
+        return
+    with db.sync_engine.begin() as conn:
+        for table in reversed(tables):
+            conn.execute(table.delete())
+
+
+async def _wipe_tables_async(db, tables) -> None:
+    if not tables:
+        return
+    async with db.async_engine.begin() as conn:
+        for table in reversed(tables):
+            await conn.execute(table.delete())
+
+
+@pytest.fixture
+def db_session(db, db_schema):
+    _wipe_tables(db, db_schema.tables)
+    connection = db.sync_engine.connect()
+    transaction = connection.begin()
+    old_factory = db._sync_session_factory
+    db._sync_session_factory = sessionmaker(
+        bind=connection,
+        expire_on_commit=False,
+        join_transaction_mode="create_savepoint",
+    )
+    try:
+        yield db
+    finally:
+        db._sync_session_factory = old_factory
+        if transaction.is_active:
+            transaction.rollback()
+        connection.close()
+        _wipe_tables(db, db_schema.tables)
+
+
+@pytest_asyncio.fixture
+async def async_db_session(async_db, db_schema, db_target):
+    registry = test_models.registry(async_db)
+    tables = test_models.schema_tables(async_db, db_target, registry)
+    await _wipe_tables_async(async_db, tables)
+    connection = await async_db.async_engine.connect()
+    transaction = await connection.begin()
+    old_factory = async_db._async_session_factory
+    async_db._async_session_factory = sessionmaker(
+        bind=connection,
+        class_=AsyncSession,
+        expire_on_commit=False,
+        join_transaction_mode="create_savepoint",
+    )
+    try:
+        yield async_db
+    finally:
+        async_db._async_session_factory = old_factory
+        if transaction.is_active:
+            await transaction.rollback()
+        await connection.close()
+        await _wipe_tables_async(async_db, tables)
+
+
+@pytest.fixture
+def db_clean(db, db_schema):
+    _wipe_tables(db, db_schema.tables)
+    try:
+        yield db
+    finally:
+        _wipe_tables(db, db_schema.tables)
+
+
+@pytest.fixture(scope="session")
+def model_registry(db):
+    return test_models.registry(db)
+
+
+@pytest.fixture
+def core_models(db_session, db_schema):
+    registry = db_schema.registry
+    return registry.User, registry.Post, db_session
+
+
+@pytest_asyncio.fixture
+async def async_core_models(async_db_session):
+    registry = test_models.registry(async_db_session)
+    return registry.User, registry.Post, async_db_session
+
+
+@pytest.fixture
+def core_models_clean(db_clean, db_schema):
+    registry = db_schema.registry
+    return registry.User, registry.Post, db_clean
+
+
+@pytest.fixture
+def require_json(db_target):
+    if db_target.is_async or not db_target.supports_json:
+        pytest.skip(f"JSON helpers require PostgreSQL-style operators; got {db_target.dialect}.")
+    return True
+
+
+@pytest.fixture
+def require_array(db_target):
+    if db_target.is_async or not db_target.supports_array:
+        pytest.skip(f"ARRAY helpers require PostgreSQL ARRAY support; got {db_target.dialect}.")
+    return True
 
 
 class StatementCounter:
