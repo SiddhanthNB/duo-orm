@@ -1,6 +1,7 @@
 # duo_orm/db.py
 
 from contextlib import asynccontextmanager, contextmanager
+import threading
 from typing import AsyncContextManager, AsyncGenerator, AsyncIterator, ContextManager, Generator, Optional, Tuple, Dict, Any, Iterator
 
 from sqlalchemy import MetaData, create_engine
@@ -138,6 +139,7 @@ class Database:
         self._async_session_factory: Optional[sessionmaker] = None
         self._connected = False
         self._engine_kwargs = engine_kwargs or {}
+        self._engine_lock = threading.RLock()
 
         # Create a new, unique declarative base from SQLAlchemy.
         Base = declarative_base()
@@ -189,10 +191,12 @@ class Database:
         if not self._sync_url:
             raise RuntimeError("Sync engine is not configured for this Database.")
         if self._sync_engine is None:
-            try:
-                self._sync_engine = create_engine(self._sync_url, **self._engine_kwargs)
-            except Exception as exc:
-                raise ConfigurationError(f"Failed to create sync engine for '{self._sync_url}'. Check URL and ensure driver is installed.") from exc
+            with self._engine_lock:
+                if self._sync_engine is None:
+                    try:
+                        self._sync_engine = create_engine(self._sync_url, **self._engine_kwargs)
+                    except Exception as exc:
+                        raise ConfigurationError(f"Failed to create sync engine for '{self._sync_url}'. Check URL and ensure driver is installed.") from exc
         return self._sync_engine
 
     @property
@@ -201,10 +205,12 @@ class Database:
         if not self._async_url:
             raise RuntimeError("Async engine is not configured for this Database.")
         if self._async_engine is None:
-            try:
-                self._async_engine = create_async_engine(self._async_url, **self._engine_kwargs)
-            except Exception as exc:
-                raise ConfigurationError(f"Failed to create async engine for '{self._async_url}'. Check URL and ensure driver is installed.") from exc
+            with self._engine_lock:
+                if self._async_engine is None:
+                    try:
+                        self._async_engine = create_async_engine(self._async_url, **self._engine_kwargs)
+                    except Exception as exc:
+                        raise ConfigurationError(f"Failed to create async engine for '{self._async_url}'. Check URL and ensure driver is installed.") from exc
         return self._async_engine
 
     def disconnect(self) -> None:
@@ -230,20 +236,24 @@ class Database:
     def sync_session_factory(self) -> sessionmaker:
         """The factory for creating synchronous SQLAlchemy `Session` objects."""
         if self._sync_session_factory is None:
-            self._sync_session_factory = sessionmaker(
-                bind=self.sync_engine, expire_on_commit=False
-            )
+            with self._engine_lock:
+                if self._sync_session_factory is None:
+                    self._sync_session_factory = sessionmaker(
+                        bind=self.sync_engine, expire_on_commit=False
+                    )
         return self._sync_session_factory
 
     @property
     def async_session_factory(self) -> sessionmaker:
         """The factory for creating asynchronous SQLAlchemy `AsyncSession` objects."""
         if self._async_session_factory is None:
-            self._async_session_factory = sessionmaker(
-                bind=self.async_engine,
-                class_=AsyncSession,
-                expire_on_commit=False,
-            )
+            with self._engine_lock:
+                if self._async_session_factory is None:
+                    self._async_session_factory = sessionmaker(
+                        bind=self.async_engine,
+                        class_=AsyncSession,
+                        expire_on_commit=False,
+                    )
         return self._async_session_factory
 
     def connect(self) -> None:
@@ -261,6 +271,25 @@ class Database:
         if self._async_url:
             _ = self.async_engine
         self._connected = True
+
+    # --- Convenience schema helpers ---
+    def create_all(self) -> None:
+        """Create all tables bound to this Database (sync or async)."""
+        if is_async_context():
+            async def _run():
+                async with self.async_engine.begin() as conn:
+                    await conn.run_sync(self.metadata.create_all)
+            return _run()
+        self.metadata.create_all(self.sync_engine)
+
+    def drop_all(self) -> None:
+        """Drop all tables bound to this Database (sync or async)."""
+        if is_async_context():
+            async def _run():
+                async with self.async_engine.begin() as conn:
+                    await conn.run_sync(self.metadata.drop_all)
+            return _run()
+        self.metadata.drop_all(self.sync_engine)
 
     @contextmanager
     def _sync_transaction_context(self) -> Iterator[Session]:

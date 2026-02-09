@@ -26,6 +26,7 @@ from sqlalchemy import (
     Integer,
     Text,
     cast,
+    tuple_ as sa_tuple,
     ARRAY as SQLAlchemyARRAY,
 )
 from sqlalchemy.orm import RelationshipProperty, joinedload, selectinload
@@ -552,6 +553,7 @@ class QueryBuilder:
         with_hooks: bool = False,
         batch_size: int = 200,
         require_filter: bool = True,
+        per_batch_transaction: bool = True,
     ) -> None | Awaitable[None]:
         """
         Performs a bulk update on all records matched by the query.
@@ -561,6 +563,8 @@ class QueryBuilder:
             with_hooks: when True, loads instances and runs per-row validation/hooks.
             batch_size: batch size for the hooked path.
             require_filter: guard against accidental full-table updates.
+            per_batch_transaction: commit each batch separately (True) or wrap the whole
+                hooked run in a single transaction (False).
         """
         normalized = _coerce_payload(values, partial=True, model_cls=self._model_cls)
         return _update_bulk(
@@ -569,6 +573,7 @@ class QueryBuilder:
             with_hooks=with_hooks,
             batch_size=batch_size,
             require_filter=require_filter,
+            per_batch_transaction=per_batch_transaction,
         )
 
     def delete(self) -> None | Awaitable[None]:
@@ -580,6 +585,7 @@ class QueryBuilder:
         with_hooks: bool = False,
         batch_size: int = 200,
         require_filter: bool = True,
+        per_batch_transaction: bool = True,
     ) -> None | Awaitable[None]:
         """
         Performs a bulk delete on all records matched by the query.
@@ -588,12 +594,15 @@ class QueryBuilder:
             with_hooks: when True, loads instances and runs per-row delete hooks.
             batch_size: batch size for the hooked path.
             require_filter: guard against accidental full-table deletes.
+            per_batch_transaction: commit each batch separately (True) or wrap the whole
+                hooked run in a single transaction (False).
         """
         return _delete_bulk(
             self,
             with_hooks=with_hooks,
             batch_size=batch_size,
             require_filter=require_filter,
+            per_batch_transaction=per_batch_transaction,
         )
 
     def find_in_batches(self, *args, **kwargs):
@@ -677,18 +686,39 @@ class QueryBuilder:
         base_stmt = self._statement
         orig_limit_clause = getattr(base_stmt, "_limit_clause", None)
         orig_offset_clause = getattr(base_stmt, "_offset_clause", None)
-        orig_limit_value = orig_limit_clause if orig_limit_clause is not None else None
-        orig_offset_value = orig_offset_clause if orig_offset_clause is not None else None
-        walked = 0
-        has_order = bool(getattr(base_stmt, "_order_by_clauses", None))
-        if not has_order:
+        order_clauses = list(getattr(base_stmt, "_order_by_clauses", []) or [])
+
+        def _is_pk_order(clauses: list, pk_columns: list) -> tuple[bool, bool]:
+            """Returns (matches_pk, descending)."""
+            if len(clauses) != len(pk_columns) or not clauses:
+                return False, False
+            desc_flags: list[bool] = []
+            for clause, pk in zip(clauses, pk_columns):
+                if clause.compare(pk.asc()):
+                    desc_flags.append(False)
+                    continue
+                if clause.compare(pk.desc()):
+                    desc_flags.append(True)
+                    continue
+                return False, False
+            # require consistent direction across PKs
+            descending = all(desc_flags)
+            if any(desc_flags) and not descending:
+                return False, False
+            return True, descending
+
+        matches_pk_order, is_desc = _is_pk_order(order_clauses, pk_cols)
+
+        use_seek = matches_pk_order or not order_clauses
+        if not order_clauses:
             base_stmt = base_stmt.order_by(*[col.asc() for col in pk_cols])
+        elif not matches_pk_order:
+            base_stmt = base_stmt
 
         active_session = active_session_var.get(None)
         db = self.db
 
         def _sync_iter():
-            nonlocal walked
             # If the original query already has LIMIT/OFFSET, fetch once respecting that slice.
             if orig_limit_clause is not None or orig_offset_clause is not None:
                 if active_session is not None:
@@ -707,18 +737,47 @@ class QueryBuilder:
                         yield row
                 return
 
-            offset = 0
+            if not use_seek:
+                offset = 0
+                while True:
+                    current_limit = batch_size
+                    stmt = base_stmt.limit(current_limit).offset(offset)
+                    if active_session is not None:
+                        session = active_session
+                        result = session.execute(stmt)
+                        rows = result.unique().scalars().all()
+                    else:
+                        with db.sync_session_factory() as session:
+                            result = session.execute(stmt)
+                            rows = result.unique().scalars().all()
+                    if not rows:
+                        break
+                    if batch:
+                        yield rows
+                    else:
+                        for row in rows:
+                            yield row
+                    if len(rows) < current_limit:
+                        break
+                    offset += batch_size
+                return
+
+            last_pk = None
             while True:
-                effective_offset = offset
-                remaining = None
-                current_limit = batch_size if remaining is None else min(batch_size, remaining)
+                current_limit = batch_size
+                stmt = base_stmt.limit(current_limit)
+                if last_pk is not None:
+                    if len(pk_cols) == 1:
+                        stmt = stmt.where(pk_cols[0] < last_pk if is_desc else pk_cols[0] > last_pk)
+                    else:
+                        stmt = stmt.where(sa_tuple(*pk_cols) < sa_tuple(*last_pk) if is_desc else sa_tuple(*pk_cols) > sa_tuple(*last_pk))
                 if active_session is not None:
                     session = active_session
-                    result = session.execute(base_stmt.limit(current_limit).offset(effective_offset))
+                    result = session.execute(stmt)
                     rows = result.unique().scalars().all()
                 else:
                     with db.sync_session_factory() as session:
-                        result = session.execute(base_stmt.limit(current_limit).offset(effective_offset))
+                        result = session.execute(stmt)
                         rows = result.unique().scalars().all()
                 if not rows:
                     break
@@ -727,13 +786,16 @@ class QueryBuilder:
                 else:
                     for row in rows:
                         yield row
-                walked += len(rows)
                 if len(rows) < current_limit:
                     break
-                offset += batch_size
+                anchor = rows[-1] if not is_desc else rows[-1]
+                last_pk = (
+                    tuple(getattr(anchor, col.key) for col in pk_cols)
+                    if len(pk_cols) > 1
+                    else getattr(anchor, pk_cols[0].key)
+                )
 
         async def _async_iter():
-            nonlocal walked
             if orig_limit_clause is not None or orig_offset_clause is not None:
                 if active_session is not None:
                     session = active_session
@@ -751,18 +813,47 @@ class QueryBuilder:
                         yield row
                 return
 
-            offset = 0
+            if not use_seek:
+                offset = 0
+                while True:
+                    current_limit = batch_size
+                    stmt = base_stmt.limit(current_limit).offset(offset)
+                    if active_session is not None:
+                        session = active_session
+                        result = await session.execute(stmt)
+                        rows = result.unique().scalars().all()
+                    else:
+                        async with db.async_session_factory() as session:
+                            result = await session.execute(stmt)
+                            rows = result.unique().scalars().all()
+                    if not rows:
+                        break
+                    if batch:
+                        yield rows
+                    else:
+                        for row in rows:
+                            yield row
+                    if len(rows) < current_limit:
+                        break
+                    offset += batch_size
+                return
+
+            last_pk = None
             while True:
-                effective_offset = offset
-                remaining = None
-                current_limit = batch_size if remaining is None else min(batch_size, remaining)
+                current_limit = batch_size
+                stmt = base_stmt.limit(current_limit)
+                if last_pk is not None:
+                    if len(pk_cols) == 1:
+                        stmt = stmt.where(pk_cols[0] < last_pk if is_desc else pk_cols[0] > last_pk)
+                    else:
+                        stmt = stmt.where(sa_tuple(*pk_cols) < sa_tuple(*last_pk) if is_desc else sa_tuple(*pk_cols) > sa_tuple(*last_pk))
                 if active_session is not None:
                     session = active_session
-                    result = await session.execute(base_stmt.limit(current_limit).offset(effective_offset))
+                    result = await session.execute(stmt)
                     rows = result.unique().scalars().all()
                 else:
                     async with db.async_session_factory() as session:
-                        result = await session.execute(base_stmt.limit(current_limit).offset(effective_offset))
+                        result = await session.execute(stmt)
                         rows = result.unique().scalars().all()
                 if not rows:
                     break
@@ -771,10 +862,14 @@ class QueryBuilder:
                 else:
                     for row in rows:
                         yield row
-                walked += len(rows)
                 if len(rows) < current_limit:
                     break
-                offset += batch_size
+                anchor = rows[-1] if not is_desc else rows[-1]
+                last_pk = (
+                    tuple(getattr(anchor, col.key) for col in pk_cols)
+                    if len(pk_cols) > 1
+                    else getattr(anchor, pk_cols[0].key)
+                )
 
         return _async_iter() if is_async_context() else _sync_iter()
 

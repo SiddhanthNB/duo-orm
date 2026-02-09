@@ -2,7 +2,7 @@
 
 from typing import Any, Awaitable, Callable, Iterable, List, Sequence, Union
 
-from sqlalchemy import func, literal, select
+from sqlalchemy import func, literal, select, tuple_ as sa_tuple, or_
 from sqlalchemy import delete as sa_delete
 from sqlalchemy import update as sa_update
 from sqlalchemy import inspect as sa_inspect
@@ -124,7 +124,8 @@ def _all(query_builder: Any) -> Union[Any, Awaitable[Any]]:
 
 def _count(query_builder: Any) -> Union[int, Awaitable[int]]:
     """Handles counting the number of records for a query."""
-    count_stmt = func.count().select().select_from(query_builder._statement.alias("subquery"))
+    stmt = query_builder._statement.order_by(None)
+    count_stmt = select(func.count()).select_from(stmt.subquery())
 
     def _sync(session):
         result = session.execute(count_stmt)
@@ -216,7 +217,7 @@ def _delete_instance(instance: Any) -> Union[None, Awaitable[None]]:
         session.flush()
 
     async def _async(session):
-        session.delete(instance)
+        await session.delete(instance)
         await session.flush()
 
     return _run_with_session(
@@ -290,6 +291,7 @@ def _update_bulk(
     with_hooks: bool,
     batch_size: int,
     require_filter: bool,
+    per_batch_transaction: bool,
 ) -> Union[None, Awaitable[None]]:
     """Handles bulk updates for a query with optional per-row hooks."""
     if batch_size <= 0:
@@ -318,56 +320,99 @@ def _update_bulk(
             work_async=_async,
         )
 
-    # with_hooks=True path: load in batches, apply per-instance updates/validation.
+    # with_hooks=True path: validate via instances but avoid long-running transactions
     def _sync(session):
-        offset = 0
         mapper = sa_inspect(query_builder._model_cls)
         pk_cols = mapper.primary_key
         base_stmt = query_builder._statement
         if not getattr(base_stmt, "_order_by_clauses", None):
             base_stmt = base_stmt.order_by(*pk_cols)
-        while True:
-            batch_stmt = base_stmt.limit(batch_size).offset(offset)
-            result = session.execute(batch_stmt)
-            instances = result.unique().scalars().all()
+        last_pk = None
+        def _process_batch():
+            nonlocal last_pk
+            stmt = base_stmt.limit(batch_size)
+            if last_pk is not None:
+                if len(pk_cols) == 1:
+                    stmt = stmt.where(pk_cols[0] > last_pk)
+                else:
+                    stmt = stmt.where(sa_tuple(*pk_cols) > sa_tuple(*last_pk))
+            instances = session.execute(stmt).unique().scalars().all()
             if not instances:
-                break
+                return False
             for instance in instances:
                 for key, val in values.items():
                     setattr(instance, key, val)
                 instance.validate()
                 instance._apply_timestamp_hooks(is_insert=False)
             session.flush(instances)
-            if len(instances) < batch_size:
-                break
-            offset += batch_size
+            last_pk = (
+                tuple(getattr(instances[-1], col.key) for col in pk_cols)
+                if len(pk_cols) > 1
+                else getattr(instances[-1], pk_cols[0].key)
+            )
+            return True
+
+        if per_batch_transaction:
+            while True:
+                processed = _process_batch()
+                if not processed:
+                    break
+                session.commit()
+        else:
+            with session.begin():
+                while True:
+                    processed = _process_batch()
+                    if not processed:
+                        break
 
     async def _async(session):
-        offset = 0
         mapper = sa_inspect(query_builder._model_cls)
         pk_cols = mapper.primary_key
         base_stmt = query_builder._statement
         if not getattr(base_stmt, "_order_by_clauses", None):
             base_stmt = base_stmt.order_by(*pk_cols)
-        while True:
-            batch_stmt = base_stmt.limit(batch_size).offset(offset)
-            result = await session.execute(batch_stmt)
-            instances = result.unique().scalars().all()
+        last_pk = None
+        async def _process_batch() -> bool:
+            nonlocal last_pk
+            stmt = base_stmt.limit(batch_size)
+            if last_pk is not None:
+                if len(pk_cols) == 1:
+                    stmt = stmt.where(pk_cols[0] > last_pk)
+                else:
+                    stmt = stmt.where(sa_tuple(*pk_cols) > sa_tuple(*last_pk))
+            instances = (await session.execute(stmt)).unique().scalars().all()
             if not instances:
-                break
+                return False
             for instance in instances:
                 for key, val in values.items():
                     setattr(instance, key, val)
                 instance.validate()
                 instance._apply_timestamp_hooks(is_insert=False)
             await session.flush(instances)
-            if len(instances) < batch_size:
-                break
-            offset += batch_size
+            last_pk = (
+                tuple(getattr(instances[-1], col.key) for col in pk_cols)
+                if len(pk_cols) > 1
+                else getattr(instances[-1], pk_cols[0].key)
+            )
+            return True
 
+        if per_batch_transaction:
+            while True:
+                processed = await _process_batch()
+                if not processed:
+                    break
+                await session.commit()
+        else:
+            async with session.begin():
+                while True:
+                    processed = await _process_batch()
+                    if not processed:
+                        break
+
+    # We manage per-batch transactions ourselves to avoid long-lived locks.
     return _run_with_session(
         query_builder=query_builder,
-        transactional=True,
+        transactional=False,
         work_sync=_sync,
         work_async=_async,
     )
@@ -379,6 +424,7 @@ def _delete_bulk(
     with_hooks: bool,
     batch_size: int,
     require_filter: bool,
+    per_batch_transaction: bool,
 ) -> Union[None, Awaitable[None]]:
     """Handles bulk deletes for a query with optional per-row hooks."""
     if batch_size <= 0:
@@ -395,14 +441,16 @@ def _delete_bulk(
         def _sync(session):
             session.execute(delete_stmt)
             session.flush()
+            session.commit()
 
         async def _async(session):
             await session.execute(delete_stmt)
             await session.flush()
+            await session.commit()
 
         return _run_with_session(
             query_builder=query_builder,
-            transactional=True,
+            transactional=False,
             work_sync=_sync,
             work_async=_async,
         )
@@ -413,17 +461,40 @@ def _delete_bulk(
         base_stmt = query_builder._statement
         if not getattr(base_stmt, "_order_by_clauses", None):
             base_stmt = base_stmt.order_by(*pk_cols)
-        while True:
-            batch_stmt = base_stmt.limit(batch_size)
-            result = session.execute(batch_stmt)
-            instances = result.unique().scalars().all()
+        last_pk = None
+        def _process_batch():
+            nonlocal last_pk
+            stmt = base_stmt.limit(batch_size)
+            if last_pk is not None:
+                if len(pk_cols) == 1:
+                    stmt = stmt.where(pk_cols[0] > last_pk)
+                else:
+                    stmt = stmt.where(sa_tuple(*pk_cols) > sa_tuple(*last_pk))
+            instances = session.execute(stmt).unique().scalars().all()
             if not instances:
-                break
+                return False
             for instance in instances:
                 session.delete(instance)
             session.flush()
-            if len(instances) < batch_size:
-                break
+            last_pk = (
+                tuple(getattr(instances[-1], col.key) for col in pk_cols)
+                if len(pk_cols) > 1
+                else getattr(instances[-1], pk_cols[0].key)
+            )
+            return True
+
+        if per_batch_transaction:
+            while True:
+                processed = _process_batch()
+                if not processed:
+                    break
+                session.commit()
+        else:
+            with session.begin():
+                while True:
+                    processed = _process_batch()
+                    if not processed:
+                        break
 
     async def _async(session):
         mapper = sa_inspect(query_builder._model_cls)
@@ -431,21 +502,44 @@ def _delete_bulk(
         base_stmt = query_builder._statement
         if not getattr(base_stmt, "_order_by_clauses", None):
             base_stmt = base_stmt.order_by(*pk_cols)
-        while True:
-            batch_stmt = base_stmt.limit(batch_size)
-            result = await session.execute(batch_stmt)
-            instances = result.unique().scalars().all()
+        last_pk = None
+        async def _process_batch() -> bool:
+            nonlocal last_pk
+            stmt = base_stmt.limit(batch_size)
+            if last_pk is not None:
+                if len(pk_cols) == 1:
+                    stmt = stmt.where(pk_cols[0] > last_pk)
+                else:
+                    stmt = stmt.where(sa_tuple(*pk_cols) > sa_tuple(*last_pk))
+            instances = (await session.execute(stmt)).unique().scalars().all()
             if not instances:
-                break
+                return False
             for instance in instances:
-                await session.delete(instance)  # type: ignore[attr-defined]
+                await session.delete(instance)
             await session.flush()
-            if len(instances) < batch_size:
-                break
+            last_pk = (
+                tuple(getattr(instances[-1], col.key) for col in pk_cols)
+                if len(pk_cols) > 1
+                else getattr(instances[-1], pk_cols[0].key)
+            )
+            return True
+
+        if per_batch_transaction:
+            while True:
+                processed = await _process_batch()
+                if not processed:
+                    break
+                await session.commit()
+        else:
+            async with session.begin():
+                while True:
+                    processed = await _process_batch()
+                    if not processed:
+                        break
 
     return _run_with_session(
         query_builder=query_builder,
-        transactional=True,
+        transactional=False,
         work_sync=_sync,
         work_async=_async,
     )

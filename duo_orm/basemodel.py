@@ -10,8 +10,9 @@ from sqlalchemy.orm.exc import UnmappedInstanceError
 
 from .query import QueryBuilder
 from ._payloads import coerce_payload as _coerce_payload
-from .executor import _save, _delete_instance, _create_bulk
+from .executor import _save, _delete_instance, _create_bulk, _run_with_session
 from .exceptions import ValidationError
+from .session import active_session_var, is_async_context
 
 if TYPE_CHECKING:
     from .db import Database
@@ -151,6 +152,7 @@ class _DuoOrmMethods:
         with_hooks: bool = False,
         batch_size: int = 200,
         require_filter: bool = True,
+        per_batch_transaction: bool = True,
     ) -> None | Awaitable[None]:
         """Convenience wrapper for QueryBuilder.update_bulk on the whole table or filtered query."""
         return cls.where().update_bulk(
@@ -158,6 +160,7 @@ class _DuoOrmMethods:
             with_hooks=with_hooks,
             batch_size=batch_size,
             require_filter=require_filter,
+            per_batch_transaction=per_batch_transaction,
         )
 
     @classmethod
@@ -167,12 +170,14 @@ class _DuoOrmMethods:
         with_hooks: bool = False,
         batch_size: int = 200,
         require_filter: bool = True,
+        per_batch_transaction: bool = True,
     ) -> None | Awaitable[None]:
         """Convenience wrapper for QueryBuilder.delete_bulk."""
         return cls.where().delete_bulk(
             with_hooks=with_hooks,
             batch_size=batch_size,
             require_filter=require_filter,
+            per_batch_transaction=per_batch_transaction,
         )
 
     @classmethod
@@ -201,8 +206,29 @@ class _DuoOrmMethods:
             if len(pk_values) != 1:
                 raise ValidationError("Exactly one positional primary key value is required.")
             filters.append(pk_cols[0] == pk_values[0])
+        identity = tuple(pk_kwargs[col.key] for col in pk_cols) if pk_kwargs else (pk_values[0],)
+        identity = identity[0] if len(identity) == 1 else identity
 
-        return cls.where(*filters).first()
+        # Use session.get to leverage the identity map when available.
+        if is_async_context():
+            async def _async_get():
+                active = active_session_var.get(None)
+                if active is not None:
+                    return await active.get(cls, identity)
+                db = cls._db
+                async with db.async_session_factory() as session:
+                    return await session.get(cls, identity)
+            return _async_get()
+
+        def _sync_get(session):
+            return session.get(cls, identity)
+
+        active = active_session_var.get(None)
+        if active is not None:
+            return _sync_get(active)
+        db = cls._db
+        with db.sync_session_factory() as session:
+            return _sync_get(session)
 
     @classmethod
     def create(cls: Type[T], data: Dict[str, Any] | T = None, **kwargs: Any) -> T | Awaitable[T]:

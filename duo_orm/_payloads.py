@@ -6,7 +6,7 @@ from sqlalchemy import inspect as sa_inspect
 
 from .exceptions import ValidationError
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError as PydanticValidationError
 
 
 def coerce_payload(obj: Any, *, partial: bool, model_cls: Type) -> Dict[str, Any]:
@@ -23,7 +23,11 @@ def coerce_payload(obj: Any, *, partial: bool, model_cls: Type) -> Dict[str, Any
     if obj is None:
         data: Dict[str, Any] = {}
     elif isinstance(obj, BaseModel):
-        data = obj.model_dump(exclude_none=partial, exclude_unset=partial)
+        try:
+            validated = type(obj).model_validate(obj)
+            data = validated.model_dump(exclude_none=partial, exclude_unset=partial)
+        except PydanticValidationError as exc:
+            raise ValidationError(str(exc)) from exc
     elif isinstance(obj, dict):
         data = dict(obj)
     else:
@@ -31,5 +35,12 @@ def coerce_payload(obj: Any, *, partial: bool, model_cls: Type) -> Dict[str, Any
 
     mapper = sa_inspect(model_cls)
     column_keys = {col.key for col in mapper.columns}
-    # Strip out anything that is not a mapped column to avoid accidental relationship writes.
-    return {k: v for k, v in data.items() if k in column_keys}
+    guarded_fields = set(getattr(model_cls, "__guarded__", ()))
+    pk_keys = {col.key for col in mapper.primary_key}
+    guarded_fields.update(pk_keys)
+
+    # Allow PKs on create (partial=False) so required keys can be provided,
+    # but still block __guarded__ fields always.
+    effective_guarded = guarded_fields if partial else (guarded_fields - pk_keys)
+
+    return {k: v for k, v in data.items() if k in column_keys and k not in effective_guarded}

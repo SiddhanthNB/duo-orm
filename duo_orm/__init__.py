@@ -26,6 +26,7 @@ from sqlalchemy import Table, ForeignKey, UniqueConstraint, CheckConstraint, Ind
 # 4. The Types Kit
 from sqlalchemy import (
     types,
+    ARRAY,
     Integer,
     BigInteger,
     SmallInteger,
@@ -40,6 +41,7 @@ from sqlalchemy import (
     UUID,
     JSON,
     LargeBinary,
+    Identity,
 )
 from sqlalchemy.dialects.postgresql import ARRAY as PG_ARRAY
 
@@ -79,6 +81,7 @@ __all__ = [
     "not_",
     # Types Kit
     "types",
+    "ARRAY",
     "Integer",
     "BigInteger",
     "SmallInteger",
@@ -93,6 +96,7 @@ __all__ = [
     "UUID",
     "JSON",
     "LargeBinary",
+    "Identity",
     "PG_ARRAY",
     # SQL Functions & Helpers Kit
     "func",
